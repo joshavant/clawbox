@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import datetime
+import plistlib
+import sys
+import urllib.parse
+from pathlib import Path
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        return 2
+
+    wallpaper_path = sys.argv[1]
+    index_plist = Path(sys.argv[2])
+    wallpaper_url = "file://" + urllib.parse.quote(wallpaper_path)
+    now = datetime.datetime.utcnow()
+
+    wallpaper_configuration = plistlib.dumps(
+        {
+            "backgroundColor": {
+                "components": [0.2549019607843137, 0.4117647058823529, 0.6666666666666666, 1.0],
+                "colorSpace": b"bplist00_\x10\x17kCGColorSpaceGenericRGB\x08\x00\x00\x00\x00\x00\x00\x01\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\"",
+            },
+            "placement": 1,
+        },
+        fmt=plistlib.FMT_BINARY,
+    )
+
+    index_plist.parent.mkdir(parents=True, exist_ok=True)
+    if index_plist.exists():
+        with index_plist.open("rb") as f:
+            data = plistlib.load(f)
+    else:
+        data = {}
+
+    data.setdefault("Displays", {})
+    data.setdefault("Spaces", {})
+
+    def set_choice(parent: dict, key_name: str) -> None:
+        section = parent.setdefault(key_name, {})
+        content = section.setdefault("Content", {})
+        choices = content.setdefault("Choices", [])
+        if not choices:
+            choices.append({})
+
+        choice = choices[0]
+        choice["Provider"] = "com.apple.wallpaper.choice.image"
+        files = choice.setdefault("Files", [])
+        if not files:
+            files.append({})
+        files[0]["relative"] = wallpaper_url
+        choice["Configuration"] = wallpaper_configuration
+        content["Shuffle"] = None
+        section["LastSet"] = now
+        section["LastUse"] = now
+
+    def update_container(container: dict, fallback_type: str) -> None:
+        container_type = container.get("Type")
+        if container_type not in ("linked", "individual", "idle"):
+            container_type = fallback_type
+        container["Type"] = container_type
+
+        keys = [k for k in ("Idle", "Desktop", "Linked") if isinstance(container.get(k), dict)]
+        if not keys:
+            if container_type == "idle":
+                keys = ["Idle"]
+            elif container_type == "individual":
+                keys = ["Desktop"]
+            else:
+                keys = ["Linked"]
+
+        for key_name in keys:
+            set_choice(container, key_name)
+
+    update_container(data.setdefault("AllSpacesAndDisplays", {}), "idle")
+    update_container(data.setdefault("SystemDefault", {}), "individual")
+
+    for display in data.get("Displays", {}).values():
+        if isinstance(display, dict):
+            update_container(display, "individual")
+
+    for space in data.get("Spaces", {}).values():
+        if not isinstance(space, dict):
+            continue
+        default = space.get("Default")
+        if isinstance(default, dict):
+            update_container(default, "individual")
+        for space_display in space.get("Displays", {}).values():
+            if isinstance(space_display, dict):
+                update_container(space_display, "individual")
+
+    with index_plist.open("wb") as f:
+        plistlib.dump(data, f, fmt=plistlib.FMT_BINARY)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

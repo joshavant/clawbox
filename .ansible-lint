@@ -1,0 +1,13 @@
+profile: min
+
+skip_list:
+  - fqcn
+  - no-changed-when
+  - partial-become
+  - risky-file-permissions
+  - var-naming
+  - yaml
+
+mock_modules:
+  - community.general.homebrew
+  - community.general.npm

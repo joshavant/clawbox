@@ -1,0 +1,86 @@
+---
+- name: Install OpenClaw official release
+  become_user: "{{ vm_name }}"
+  npm:
+    name: "openclaw@{{ openclaw_npm_version }}"
+    global: yes
+    state: present
+  environment:
+    PATH: "{{ clawbox_brew_env_path }}"
+  when: clawbox_profile != 'developer'
+
+- name: Validate developer source mount exists
+  stat:
+    path: "{{ openclaw_dev_source_dir }}"
+  register: openclaw_dev_source_dir_stat
+  when: clawbox_profile == 'developer'
+
+- name: Validate developer source package manifest exists
+  stat:
+    path: "{{ openclaw_dev_source_dir }}/package.json"
+  register: openclaw_dev_source_pkg_stat
+  when: clawbox_profile == 'developer'
+
+- name: Fail when developer source mount is unavailable
+  fail:
+    msg: >-
+      Developer profile requires a mounted OpenClaw source at {{ openclaw_dev_source_dir }}.
+      Launch with --developer --openclaw-source <path>.
+  when:
+    - clawbox_profile == 'developer'
+    - not openclaw_dev_source_dir_stat.stat.exists
+
+- name: Fail when developer source mount is not an OpenClaw checkout
+  fail:
+    msg: >-
+      {{ openclaw_dev_source_dir }} does not contain package.json.
+      Verify --openclaw-source points to an OpenClaw repository checkout.
+  when:
+    - clawbox_profile == 'developer'
+    - not openclaw_dev_source_pkg_stat.stat.exists
+
+- name: Install pnpm
+  become_user: "{{ vm_name }}"
+  npm:
+    name: pnpm
+    global: yes
+    state: present
+  environment:
+    PATH: "{{ clawbox_brew_env_path }}"
+  when: clawbox_profile == 'developer'
+
+- name: Install OpenClaw source dependencies
+  become_user: "{{ vm_name }}"
+  command: pnpm install --frozen-lockfile
+  args:
+    chdir: "{{ openclaw_dev_source_dir }}"
+  environment:
+    PATH: "{{ clawbox_brew_env_path }}"
+    CI: "true"
+  when: clawbox_profile == 'developer'
+
+- name: Run fast-fail OpenClaw source build gate
+  become_user: "{{ vm_name }}"
+  command: pnpm exec tsdown
+  args:
+    chdir: "{{ openclaw_dev_source_dir }}"
+  environment:
+    PATH: "{{ clawbox_brew_env_path }}"
+    CI: "true"
+  when: clawbox_profile == 'developer'
+
+- name: Link mounted OpenClaw source as global openclaw command
+  become_user: "{{ vm_name }}"
+  command: npm link
+  args:
+    chdir: "{{ openclaw_dev_source_dir }}"
+  environment:
+    PATH: "{{ clawbox_brew_env_path }}"
+  when: clawbox_profile == 'developer'
+
+- name: Verify OpenClaw CLI
+  become_user: "{{ vm_name }}"
+  command: openclaw --version
+  environment:
+    PATH: "{{ clawbox_brew_env_path }}"
+  changed_when: false

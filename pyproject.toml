@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clawbox"
+version = "1.0.0"
+description = "Clawbox macOS VM orchestration"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Clawbox" }]
+
+[project.scripts]
+clawbox = "clawbox.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["clawbox*"]
+
+[tool.setuptools.data-files]
+"share/clawbox/ansible" = [
+  "ansible/ansible.cfg",
+  "ansible/secrets.example.yml",
+]
+"share/clawbox/ansible/group_vars" = [
+  "ansible/group_vars/all.yml",
+  "ansible/group_vars/settings.yml",
+]
+"share/clawbox/ansible/inventory" = [
+  "ansible/inventory/tart_inventory.py",
+]
+"share/clawbox/ansible/playbooks" = [
+  "ansible/playbooks/provision.yml",
+]
+"share/clawbox/ansible/roles/cleanup_admin/tasks" = [
+  "ansible/roles/cleanup_admin/tasks/main.yml",
+]
+"share/clawbox/ansible/roles/homebrew/tasks" = [
+  "ansible/roles/homebrew/tasks/main.yml",
+]
+"share/clawbox/ansible/roles/node/tasks" = [
+  "ansible/roles/node/tasks/main.yml",
+]
+"share/clawbox/ansible/roles/openclaw/tasks" = [
+  "ansible/roles/openclaw/tasks/main.yml",
+]
+"share/clawbox/ansible/roles/playwright/tasks" = [
+  "ansible/roles/playwright/tasks/main.yml",
+]
+"share/clawbox/ansible/roles/setup_assistant/tasks" = [
+  "ansible/roles/setup_assistant/tasks/main.yml",
+]
+"share/clawbox/ansible/roles/setup_assistant/templates" = [
+  "ansible/roles/setup_assistant/templates/clawbox-apply-wallpaper.py.j2",
+  "ansible/roles/setup_assistant/templates/clawbox-apply-wallpaper.sh.j2",
+  "ansible/roles/setup_assistant/templates/com.clawbox.apply-wallpaper.plist.j2",
+]
+"share/clawbox/ansible/roles/shared_folders/tasks" = [
+  "ansible/roles/shared_folders/tasks/main.yml",
+]
+"share/clawbox/ansible/roles/signal_cli/tasks" = [
+  "ansible/roles/signal_cli/tasks/main.yml",
+]
+"share/clawbox/ansible/roles/signal_cli/templates" = [
+  "ansible/roles/signal_cli/templates/com.clawbox.signal-cli-payload-sync.plist.j2",
+  "ansible/roles/signal_cli/templates/sync-signal-cli-payload.sh.j2",
+]
+"share/clawbox/ansible/roles/system/tasks" = [
+  "ansible/roles/system/tasks/main.yml",
+]
+"share/clawbox/ansible/roles/tailscale/tasks" = [
+  "ansible/roles/tailscale/tasks/main.yml",
+]
+"share/clawbox/ansible/roles/tart_guest_agent/tasks" = [
+  "ansible/roles/tart_guest_agent/tasks/main.yml",
+]
+"share/clawbox/ansible/roles/tart_guest_agent/templates" = [
+  "ansible/roles/tart_guest_agent/templates/org.cirruslabs.tart-guest-agent.plist.j2",
+  "ansible/roles/tart_guest_agent/templates/org.cirruslabs.tart-guest-daemon.plist.j2",
+]
+"share/clawbox/packer" = [
+  "packer/macos-base.pkr.hcl",
+]
+"share/clawbox/assets" = [
+  "assets/logo.png",
+  "assets/lobster_in_a_box.png",
+]

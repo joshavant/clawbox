@@ -1,0 +1,37 @@
+---
+# Base name used to derive hostname, username, etc.
+vm_base_name: clawbox
+bootstrap_admin_user: admin
+bootstrap_admin_password: admin
+
+# Profile and feature flags
+clawbox_profile: standard
+clawbox_enable_dev_mounts: false
+clawbox_enable_playwright: false
+clawbox_enable_tailscale: false
+clawbox_enable_signal_cli: false
+clawbox_enable_signal_payload: false
+
+# OpenClaw install channel
+openclaw_npm_version: latest
+clawbox_brew_env_path: "/opt/homebrew/bin:{{ ansible_facts['env']['PATH'] | default('/usr/bin:/bin:/usr/sbin:/sbin') }}"
+
+# VirtioFS mount points inside the guest
+signal_cli_payload_mount: "/Volumes/My Shared Files/signal-cli-payload"
+openclaw_source_mount: "/Volumes/My Shared Files/openclaw-source"
+openclaw_payload_mount: "/Volumes/My Shared Files/openclaw-payload"
+
+# Guest-side paths
+openclaw_dev_source_dir: "/Users/{{ vm_name }}/Developer/openclaw"
+openclaw_dev_payload_dir: "/Users/{{ vm_name }}/.openclaw"
+signal_cli_data_dir: ".local/share/signal-cli"  # relative to /Users/<vm_name>/
+vm_profile_photo_path: "/Library/User Pictures/Clawbox/clawbox-profile-photo.png"
+
+# signal-cli payload sync (VM local -> mounted host payload)
+signal_cli_payload_sync_launchd_label: "com.clawbox.signal-cli-payload-sync"
+signal_cli_payload_sync_tooling_dir: "/Library/Clawbox"
+signal_cli_payload_sync_script_path: "{{ signal_cli_payload_sync_tooling_dir }}/sync-signal-cli-payload.sh"
+signal_cli_payload_sync_interval_seconds: 10
+signal_cli_payload_sync_exit_timeout_seconds: 30
+signal_cli_payload_sync_max_consecutive_failures: 12
+signal_cli_payload_marker_filename: ".clawbox-signal-payload-host-marker"

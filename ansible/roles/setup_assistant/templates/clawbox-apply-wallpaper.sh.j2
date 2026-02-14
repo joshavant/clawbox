@@ -1,0 +1,27 @@
+#!/bin/bash
+set -euo pipefail
+
+WALLPAPER_PATH="{{ desktop_wallpaper_path }}"
+INDEX_PLIST="$HOME/Library/Application Support/com.apple.wallpaper/Store/Index.plist"
+PLIST_PATH="/Users/{{ vm_name }}/Library/LaunchAgents/com.clawbox.apply-wallpaper.plist"
+SCRIPT_PATH="/Users/{{ vm_name }}/Library/LaunchAgents/com.clawbox.apply-wallpaper.sh"
+PYTHON_HELPER="/Users/{{ vm_name }}/Library/LaunchAgents/com.clawbox.apply-wallpaper.py"
+MAX_ATTEMPTS=10
+SLEEP_SECONDS=0.2
+
+cleanup() {
+  rm -f "$PLIST_PATH" "$SCRIPT_PATH" "$PYTHON_HELPER"
+}
+
+/usr/bin/defaults write com.apple.desktop Background "{default = {ImageFilePath = \"$WALLPAPER_PATH\";};}" || true
+
+for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
+  python3 "$PYTHON_HELPER" "$WALLPAPER_PATH" "$INDEX_PLIST"
+  sleep "$SLEEP_SECONDS"
+done
+
+# Restart once after final write so the desktop redraw happens a single time.
+pkill -x WallpaperAgent >/dev/null 2>&1 || true
+
+cleanup
+exit 0

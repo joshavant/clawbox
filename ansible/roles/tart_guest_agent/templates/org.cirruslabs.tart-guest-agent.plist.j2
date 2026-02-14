@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>org.cirruslabs.tart-guest-agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/tart-guest-agent</string>
+    <string>--run-agent</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/bin:/usr/bin:/usr/sbin:/usr/local/bin:/opt/homebrew/bin</string>
+    <key>TERM</key>
+    <string>xterm-256color</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>/Users/{{ vm_name }}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/tart-guest-agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/tart-guest-agent.log</string>
+</dict>
+</plist>

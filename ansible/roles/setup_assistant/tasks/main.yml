@@ -1,0 +1,173 @@
+---
+- name: Validate setup assistant settings are present
+  assert:
+    that:
+      - setup_assistant_preferences is defined
+      - user_defaults_settings is defined
+      - system_defaults_settings is defined
+      - desktop_wallpaper_path is defined
+    fail_msg: "Missing setup settings. Ensure ansible/group_vars/settings.yml is loaded."
+
+- name: Get macOS product version
+  command: sw_vers -productVersion
+  register: macos_product_version
+  changed_when: false
+
+- name: Get macOS build version
+  command: sw_vers -buildVersion
+  register: macos_build_version
+  changed_when: false
+
+- name: Ensure Apple setup completion marker exists
+  file:
+    path: /var/db/.AppleSetupDone
+    state: touch
+    mode: "0644"
+  become: true
+
+- name: Build typed Setup Assistant preference operations
+  set_fact:
+    setup_assistant_typed_preferences: >-
+      {{
+        ((setup_assistant_preferences.bool | default({}) | dict2items)
+          | map('combine', {'pref_type': 'bool'}) | list)
+        + ((setup_assistant_preferences.integer | default({}) | dict2items)
+          | map('combine', {'pref_type': 'int'}) | list)
+        + ((setup_assistant_preferences.string | default({}) | dict2items)
+          | map('combine', {'pref_type': 'string'}) | list)
+      }}
+
+- name: Apply typed Setup Assistant preferences
+  become_user: "{{ vm_name }}"
+  command:
+    argv:
+      - /usr/bin/defaults
+      - write
+      - "/Users/{{ vm_name }}/Library/Preferences/com.apple.SetupAssistant"
+      - "{{ item.key }}"
+      - "{{ '-bool' if item.pref_type == 'bool' else ('-int' if item.pref_type == 'int' else '-string') }}"
+      - "{{ ('true' if item.value else 'false') if item.pref_type == 'bool' else (item.value | string) }}"
+  loop: "{{ setup_assistant_typed_preferences }}"
+  changed_when: false
+
+- name: Apply Setup Assistant product version preferences
+  become_user: "{{ vm_name }}"
+  command:
+    argv:
+      - /usr/bin/defaults
+      - write
+      - "/Users/{{ vm_name }}/Library/Preferences/com.apple.SetupAssistant"
+      - "{{ item }}"
+      - -string
+      - "{{ macos_product_version.stdout }}"
+  loop: "{{ setup_assistant_preferences.product_version_keys | default([]) }}"
+  changed_when: false
+
+- name: Apply Setup Assistant build version preferences
+  become_user: "{{ vm_name }}"
+  command:
+    argv:
+      - /usr/bin/defaults
+      - write
+      - "/Users/{{ vm_name }}/Library/Preferences/com.apple.SetupAssistant"
+      - "{{ item }}"
+      - -string
+      - "{{ macos_build_version.stdout }}"
+  loop: "{{ setup_assistant_preferences.build_version_keys | default([]) }}"
+  changed_when: false
+
+- name: Apply user defaults
+  become_user: "{{ vm_name }}"
+  command:
+    argv:
+      - /usr/bin/defaults
+      - write
+      - "{{ item.domain }}"
+      - "{{ item.key }}"
+      - "{{ '-bool' if item.type == 'bool' else ('-int' if item.type == 'int' else '-string') }}"
+      - "{{ ('true' if item.value else 'false') if item.type == 'bool' else (item.value | string) }}"
+  loop: "{{ user_defaults_settings }}"
+  changed_when: false
+
+- name: Apply system defaults
+  command:
+    argv:
+      - /usr/bin/defaults
+      - write
+      - "{{ item.domain }}"
+      - "{{ item.key }}"
+      - "{{ '-bool' if item.type == 'bool' else ('-int' if item.type == 'int' else '-string') }}"
+      - "{{ ('true' if item.value else 'false') if item.type == 'bool' else (item.value | string) }}"
+  loop: "{{ system_defaults_settings }}"
+  become: true
+  changed_when: false
+
+- name: Validate wallpaper file exists
+  stat:
+    path: "{{ desktop_wallpaper_path }}"
+  register: desktop_wallpaper_file_stat
+
+- name: Fail when wallpaper file is missing
+  fail:
+    msg: "Configured wallpaper file does not exist: {{ desktop_wallpaper_path }}"
+  when: not desktop_wallpaper_file_stat.stat.exists
+
+- name: Ensure one-time wallpaper helper directories exist
+  become_user: "{{ vm_name }}"
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "/Users/{{ vm_name }}/Library/LaunchAgents"
+
+- name: Install one-time wallpaper helper script
+  become_user: "{{ vm_name }}"
+  template:
+    src: clawbox-apply-wallpaper.sh.j2
+    dest: "/Users/{{ vm_name }}/Library/LaunchAgents/com.clawbox.apply-wallpaper.sh"
+    mode: "0755"
+
+- name: Install one-time wallpaper helper Python module
+  become_user: "{{ vm_name }}"
+  template:
+    src: clawbox-apply-wallpaper.py.j2
+    dest: "/Users/{{ vm_name }}/Library/LaunchAgents/com.clawbox.apply-wallpaper.py"
+    mode: "0755"
+
+- name: Install one-time wallpaper LaunchAgent
+  become_user: "{{ vm_name }}"
+  template:
+    src: com.clawbox.apply-wallpaper.plist.j2
+    dest: "/Users/{{ vm_name }}/Library/LaunchAgents/com.clawbox.apply-wallpaper.plist"
+    mode: "0644"
+
+- name: Check modern Terminal.app path
+  stat:
+    path: /System/Applications/Utilities/Terminal.app
+  register: terminal_app_system_path
+
+- name: Set Terminal.app source path for desktop symlink
+  set_fact:
+    terminal_app_source_path: "/System/Applications/Utilities/Terminal.app"
+
+- name: Fail when Terminal.app cannot be located
+  fail:
+    msg: "Unable to locate Terminal.app for desktop symlink creation."
+  when: not terminal_app_system_path.stat.exists
+
+- name: Check existing Terminal desktop shortcut path
+  become_user: "{{ vm_name }}"
+  stat:
+    path: "/Users/{{ vm_name }}/Desktop/Terminal.app"
+  register: terminal_desktop_shortcut_path
+
+- name: Symlink Terminal.app to user desktop
+  become_user: "{{ vm_name }}"
+  file:
+    src: "{{ terminal_app_source_path }}"
+    dest: "/Users/{{ vm_name }}/Desktop/Terminal.app"
+    state: link
+    force: true
+  when:
+    - not terminal_desktop_shortcut_path.stat.exists or (terminal_desktop_shortcut_path.stat.islnk | default(false))

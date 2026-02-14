@@ -1,0 +1,41 @@
+---
+name: Cirrus Label Enforcement
+
+on:
+  pull_request:
+    types:
+      - labeled
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  enforce-label-owner:
+    if: >-
+      ${{
+        github.actor != 'joshavant' &&
+        (
+          github.event.label.name == 'ci:integration-smoke' ||
+          github.event.label.name == 'ci:integration-full'
+        )
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove unauthorized Cirrus integration label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.payload.pull_request.number;
+            const label = context.payload.label.name;
+
+            await github.rest.issues.removeLabel({
+              owner,
+              repo,
+              issue_number,
+              name: label,
+            });
+
+            core.info(`Removed unauthorized label '${label}' from PR #${issue_number}`);

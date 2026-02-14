@@ -1,0 +1,82 @@
+---
+- name: Check if Tailscale GUI app is already installed
+  stat:
+    path: /Applications/Tailscale.app
+  register: tailscale_app_pre
+
+- name: Install Tailscale GUI app when missing
+  when: not tailscale_app_pre.stat.exists
+  block:
+    - name: Get latest Tailscale stable version
+      uri:
+        url: https://pkgs.tailscale.com/stable/?mode=json
+        return_content: yes
+      register: tailscale_releases
+
+    # Alternative: pin a version in group_vars instead of fetching latest
+    - name: Set Tailscale version
+      set_fact:
+        tailscale_version: "{{ tailscale_releases.json.Version | default('1.94.1') }}"
+
+    - name: Download Tailscale standalone .pkg
+      get_url:
+        url: "https://pkgs.tailscale.com/stable/Tailscale-{{ tailscale_version }}-macos.pkg"
+        dest: "/tmp/Tailscale.pkg"
+
+    - name: Install Tailscale .pkg
+      command: installer -pkg /tmp/Tailscale.pkg -target /
+      register: tailscale_install
+      failed_when: false
+
+    - name: Check whether Tailscale.app exists after installer run
+      stat:
+        path: /Applications/Tailscale.app
+      register: tailscale_app_post_install
+
+    - name: Fail only if installer failed and Tailscale.app is absent
+      fail:
+        msg: >-
+          Tailscale installer failed (rc={{ tailscale_install.rc }}) and
+          /Applications/Tailscale.app was not found.
+          stdout={{ tailscale_install.stdout | default('') }}
+          stderr={{ tailscale_install.stderr | default('') }}
+      when: tailscale_install.rc != 0 and not tailscale_app_post_install.stat.exists
+
+    - name: Note when installer returns non-zero but app exists
+      debug:
+        msg: >-
+          Tailscale installer returned rc={{ tailscale_install.rc }}, but
+          /Applications/Tailscale.app exists. Continuing.
+      when: tailscale_install.rc != 0 and tailscale_app_post_install.stat.exists
+
+    - name: Clean up installer
+      file:
+        path: /tmp/Tailscale.pkg
+        state: absent
+
+- name: Verify Tailscale GUI app is present
+  stat:
+    path: /Applications/Tailscale.app
+  register: tailscale_app_final
+
+- name: Fail if Tailscale GUI app is missing
+  fail:
+    msg: "Tailscale GUI app is not installed at /Applications/Tailscale.app."
+  when: not tailscale_app_final.stat.exists
+
+- name: Check existing Tailscale desktop shortcut path
+  become_user: "{{ vm_name }}"
+  stat:
+    path: "/Users/{{ vm_name }}/Desktop/Tailscale.app"
+  register: tailscale_desktop_shortcut_path
+
+- name: Symlink Tailscale.app to user desktop
+  become_user: "{{ vm_name }}"
+  file:
+    src: /Applications/Tailscale.app
+    dest: "/Users/{{ vm_name }}/Desktop/Tailscale.app"
+    state: link
+    force: true
+  when:
+    - tailscale_app_final.stat.exists
+    - not tailscale_desktop_shortcut_path.stat.exists or (tailscale_desktop_shortcut_path.stat.islnk | default(false))

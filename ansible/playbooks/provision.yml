@@ -1,0 +1,57 @@
+---
+# Play 1: Run as admin user (from vanilla image) to create the real user and enable SSH
+- name: "Bootstrap: create user and enable SSH"
+  hosts: all
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/settings.yml
+  vars:
+    ansible_user: "{{ bootstrap_admin_user }}"
+    ansible_password: "{{ bootstrap_admin_password }}"
+    vm_name: "{{ vm_base_name }}-{{ vm_number }}"
+  roles:
+    - role: system
+      tags: [system]
+
+# Play 2: Run as the real user for all software provisioning
+- name: "Provision: install software and configure"
+  hosts: all
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/settings.yml
+  vars:
+    ansible_user: "{{ vm_base_name }}-{{ vm_number }}"
+    ansible_password: "{{ vm_password }}"
+    ansible_become_password: "{{ vm_password }}"
+    vm_name: "{{ vm_base_name }}-{{ vm_number }}"
+  roles:
+    - role: homebrew
+      tags: [homebrew]
+    - role: tart_guest_agent
+      tags: [tart_guest_agent]
+    - role: node
+      tags: [node]
+    - role: playwright
+      when: clawbox_enable_playwright | bool
+      tags: [playwright]
+    - role: tailscale
+      when: clawbox_enable_tailscale | bool
+      tags: [tailscale]
+    - role: shared_folders
+      when: clawbox_enable_dev_mounts | bool
+      tags: [shared_folders, developer]
+    - role: openclaw
+      tags: [openclaw]
+    - role: signal_cli
+      when: clawbox_enable_signal_cli | bool
+      tags: [signal_cli]
+    - role: setup_assistant
+      tags: [setup_assistant]
+    - role: cleanup_admin
+      tags: [cleanup]
+  post_tasks:
+    - name: Reboot host to finalize provisioning
+      reboot:
+        reboot_timeout: 900
+      become: true
+      tags: [cleanup, reboot]

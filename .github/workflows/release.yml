@@ -1,0 +1,131 @@
+---
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag (vX.Y.Z)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag and Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release metadata
+        run: |
+          ./scripts/release/metadata.sh check \
+            --version "${{ inputs.version }}" \
+            --pyproject pyproject.toml \
+            --changelog CHANGELOG.md
+
+      - name: Generate release notes from changelog
+        run: |
+          ./scripts/release/metadata.sh notes \
+            --version "${{ inputs.version }}" \
+            --pyproject pyproject.toml \
+            --changelog CHANGELOG.md \
+            --output .release-notes.md
+
+      - name: Ensure tag does not already exist
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          if git rev-parse --verify --quiet "${version}" >/dev/null; then
+            echo "Error: tag already exists locally: ${version}"
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/${version}" | grep -q "${version}$"; then
+            echo "Error: tag already exists on origin: ${version}"
+            exit 1
+          fi
+
+      - name: Create and push annotated tag
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${version}" -m "Release ${version}"
+          git push origin "${version}"
+
+      - name: Build source tarball artifact
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          version_no_v="${version#v}"
+          archive="clawbox-${version_no_v}.tar.gz"
+          git archive --format=tar.gz --prefix="clawbox-${version_no_v}/" "${version}" > "${archive}"
+          sha256sum "${archive}" > "${archive}.sha256"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          version_no_v="${version#v}"
+          archive="clawbox-${version_no_v}.tar.gz"
+          gh release create "${version}" \
+            "${archive}" \
+            "${archive}.sha256" \
+            --title "${version}" \
+            --notes-file .release-notes.md
+
+      - name: Fail when tap token is not configured
+        env:
+          HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOMEBREW_TAP_PAT}" ]; then
+            echo "Error: missing required secret HOMEBREW_TAP_PAT"
+            echo "Create a fine-grained token with contents:write on joshavant/homebrew-tap and add it as a repository secret."
+            exit 1
+          fi
+
+      - name: Checkout Homebrew tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: joshavant/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_PAT }}
+          path: homebrew-tap
+          fetch-depth: 0
+
+      - name: Update Homebrew formula to this release
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          version_no_v="${version#v}"
+          archive="clawbox-${version_no_v}.tar.gz"
+          archive_sha="$(awk '{print $1}' "${archive}.sha256")"
+          ./scripts/release/update-formula.sh \
+            --formula homebrew-tap/Formula/clawbox.rb \
+            --version "${version}" \
+            --sha256 "${archive_sha}"
+
+      - name: Commit and push formula update to tap
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet -- Formula/clawbox.rb; then
+            echo "Formula already up to date for ${version}."
+            exit 0
+          fi
+
+          git add Formula/clawbox.rb
+          git commit -m "chore(formula): update Homebrew formula for ${version}"
+          git push origin HEAD:main

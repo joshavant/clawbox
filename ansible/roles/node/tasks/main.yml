@@ -1,0 +1,8 @@
+---
+- name: Install Node.js via Homebrew
+  become_user: "{{ vm_name }}"
+  community.general.homebrew:
+    name: node
+    state: present
+  environment:
+    PATH: "{{ clawbox_brew_env_path }}"

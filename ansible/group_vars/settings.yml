@@ -1,0 +1,79 @@
+---
+# UX-oriented defaults applied to each provisioned VM user.
+# Edit values in this file to change first-login behavior and defaults.
+
+setup_assistant_preferences:
+  bool:
+    DidSeeAccessibility: true
+    DidSeePrivacy: true
+    DidSeeCloudSetup: true
+    DidSeeiCloudLoginForStorageServices: true
+    DidSeeScreenTime: true
+    DidSeeSiriSetup: true
+    DidSeeAppearanceSetup: true
+    DidSeeApplePaySetup: false
+    DidSeeTouchIDSetup: false
+    DidSeeAppStore: false
+    DidSeeActivationLock: false
+    DidSeeLockdownMode: false
+    DidSeeSyncSetup: false
+    DidSeeSyncSetup2: false
+    DidSeeTermsOfAddress: false
+    SkipExpressSettingsUpdating: false
+    SkipFirstLoginOptimization: false
+    MiniBuddyShouldLaunchToResumeSetup: false
+    MiniBuddyLaunchedPostMigration: false
+    InitialAccountOnMac: false
+    NSAddServicesToContextMenus: false
+  integer:
+    MiniBuddyLaunchReason: 0
+    LastPrivacyBundleVersion: 2
+  string:
+    selectedFDEEscrowType: "DeclinedFDE"
+    PreviousSystemVersion: "0"
+    PreviousBuildVersion: "0"
+  product_version_keys:
+    - InitialSetupProductVersion
+    - LastSeenCloudProductVersion
+    - LastSeenDiagnosticsProductVersion
+    - LastSeenSiriProductVersion
+    - LastPreLoginTasksPerformedVersion
+  build_version_keys:
+    - InitialSetupBuildVersion
+    - LastPreLoginTasksPerformedBuild
+    - LastSeenBuddyBuildVersion
+
+user_defaults_settings:
+  - domain: "NSGlobalDomain"
+    key: "AppleInterfaceStyle"
+    type: "string"
+    value: "Dark"
+  - domain: "com.apple.assistant.support"
+    key: "Assistant Enabled"
+    type: "bool"
+    value: false
+  - domain: "com.apple.Siri"
+    key: "StatusMenuVisible"
+    type: "bool"
+    value: false
+
+system_defaults_settings:
+  - domain: "/Library/Application Support/CrashReporter/DiagnosticMessagesHistory"
+    key: "ThirdPartyDataSubmit"
+    type: "bool"
+    value: false
+  - domain: "/Library/Preferences/com.apple.SoftwareUpdate"
+    key: "AutomaticCheckEnabled"
+    type: "bool"
+    value: true
+  - domain: "/Library/Preferences/com.apple.SoftwareUpdate"
+    key: "AutomaticDownload"
+    type: "bool"
+    value: true
+  - domain: "/Library/Preferences/com.apple.SoftwareUpdate"
+    key: "AutomaticallyInstallMacOSUpdates"
+    type: "bool"
+    value: false
+
+# Default desktop wallpaper for the provisioned VM user.
+desktop_wallpaper_path: "/System/Library/Desktop Pictures/Solid Colors/Dusty Rose.png"

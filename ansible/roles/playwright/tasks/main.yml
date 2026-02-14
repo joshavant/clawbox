@@ -1,0 +1,16 @@
+---
+- name: Install Playwright globally
+  become_user: "{{ vm_name }}"
+  npm:
+    name: playwright
+    global: yes
+    state: present
+  environment:
+    PATH: "{{ clawbox_brew_env_path }}"
+
+- name: Install Playwright browsers
+  become_user: "{{ vm_name }}"
+  command: npx playwright install
+  environment:
+    PATH: "{{ clawbox_brew_env_path }}"
+    CI: "true"

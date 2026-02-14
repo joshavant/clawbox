@@ -1,0 +1,55 @@
+---
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  pr-policy:
+    name: PR Policy
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce Conventional Commit PR title
+        env:
+          CLAWBOX_PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          ./scripts/pr check-title --title "${CLAWBOX_PR_TITLE}"
+
+  fast:
+    name: Fast Checks
+    runs-on: ubuntu-latest
+    needs: [pr-policy]
+    if: always() && (github.event_name != 'pull_request' || needs.pr-policy.result == 'success')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bootstrap fast dependencies
+        run: ./scripts/ci/bootstrap.sh fast
+
+      - name: Run fast checks
+        run: ./scripts/ci/run.sh fast
+
+  logic:
+    name: Logic Checks
+    runs-on: ubuntu-latest
+    needs: [pr-policy]
+    if: always() && (github.event_name != 'pull_request' || needs.pr-policy.result == 'success')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bootstrap logic dependencies
+        run: ./scripts/ci/bootstrap.sh logic
+
+      - name: Run logic checks
+        run: ./scripts/ci/run.sh logic

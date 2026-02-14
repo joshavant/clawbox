@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{{ signal_cli_payload_sync_launchd_label }}</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ signal_cli_payload_sync_script_path }}</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>ExitTimeOut</key>
+  <integer>{{ signal_cli_payload_sync_exit_timeout_seconds }}</integer>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>UserName</key>
+  <string>{{ vm_name }}</string>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/{{ signal_cli_payload_sync_launchd_label }}.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/{{ signal_cli_payload_sync_launchd_label }}.log</string>
+</dict>
+</plist>

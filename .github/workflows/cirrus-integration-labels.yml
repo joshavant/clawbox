@@ -1,0 +1,72 @@
+---
+name: Cirrus Integration Labels
+
+on:
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  apply-label:
+    if: >-
+      ${{
+        github.event.issue.pull_request &&
+        github.event.comment.user.login == 'joshavant' &&
+        (
+          startsWith(github.event.comment.body, '/ci integration smoke') ||
+          startsWith(github.event.comment.body, '/ci integration full')
+        )
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply requested Cirrus integration label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.comment.body.trim().toLowerCase();
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.payload.issue.number;
+
+            let addLabel = null;
+            let removeLabel = null;
+
+            if (body.startsWith('/ci integration smoke')) {
+              addLabel = 'ci:integration-smoke';
+              removeLabel = 'ci:integration-full';
+            } else if (body.startsWith('/ci integration full')) {
+              addLabel = 'ci:integration-full';
+              removeLabel = 'ci:integration-smoke';
+            }
+
+            if (!addLabel) {
+              core.info('No recognized integration command.');
+              return;
+            }
+
+            if (removeLabel) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number,
+                  name: removeLabel,
+                });
+              } catch (err) {
+                core.info(`No '${removeLabel}' label to remove.`);
+              }
+            }
+
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number,
+              labels: [addLabel],
+            });
+
+            core.info(`Applied label: ${addLabel}`);

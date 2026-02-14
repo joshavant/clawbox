@@ -1,0 +1,84 @@
+---
+- name: Set ComputerName
+  command: scutil --set ComputerName "{{ vm_name }}"
+
+- name: Set LocalHostName
+  command: scutil --set LocalHostName "{{ vm_name }}"
+
+- name: Set HostName
+  command: scutil --set HostName "{{ vm_name }}"
+
+- name: Check if login user already exists
+  command: id -u "{{ vm_name }}"
+  register: vm_user_check
+  failed_when: false
+  changed_when: false
+
+- name: Create login user
+  command: >
+    sysadminctl -addUser "{{ vm_name }}"
+    -fullName "{{ vm_name }}"
+    -password "{{ vm_password }}"
+    -admin
+  when: vm_user_check.rc != 0
+
+- name: Ensure profile photo directory exists
+  file:
+    path: /Library/User Pictures/Clawbox
+    state: directory
+    owner: root
+    group: wheel
+    mode: "0755"
+  become: true
+
+- name: Install Clawbox profile photo
+  copy:
+    src: "{{ playbook_dir }}/../../assets/lobster_in_a_box.png"
+    dest: "{{ vm_profile_photo_path }}"
+    owner: root
+    group: wheel
+    mode: "0644"
+  become: true
+
+- name: Check current login user profile photo
+  command: dscl . -read "/Users/{{ vm_name }}" Picture
+  register: vm_profile_photo_check
+  failed_when: false
+  changed_when: false
+  become: true
+
+- name: Set login user profile photo
+  command: dscl . -create "/Users/{{ vm_name }}" Picture "{{ vm_profile_photo_path }}"
+  when: "'Picture: ' ~ vm_profile_photo_path not in (vm_profile_photo_check.stdout | default(''))"
+  become: true
+
+- name: Remove embedded login user JPEG photo to prefer path-based profile photo
+  command: dscl . -delete "/Users/{{ vm_name }}" JPEGPhoto
+  register: vm_profile_jpegphoto_remove
+  failed_when: false
+  changed_when: vm_profile_jpegphoto_remove.rc == 0
+  become: true
+
+- name: Check whether user is already allowed for SSH
+  command: dseditgroup -o checkmember -m "{{ vm_name }}" com.apple.access_ssh
+  register: ssh_access_check
+  failed_when: false
+  changed_when: false
+
+- name: Allow SSH for new user
+  command: dseditgroup -o edit -a "{{ vm_name }}" -t user com.apple.access_ssh
+  when: ssh_access_check.rc != 0
+
+- name: Grant new user passwordless sudo
+  copy:
+    content: "{{ vm_name }} ALL=(ALL) NOPASSWD: ALL"
+    dest: "/etc/sudoers.d/{{ vm_name }}-nopasswd"
+    mode: "0440"
+
+- name: Verify new user can SSH
+  wait_for_connection:
+    delay: 2
+    timeout: 30
+  vars:
+    ansible_user: "{{ vm_name }}"
+    ansible_password: "{{ vm_password }}"

@@ -1,0 +1,19 @@
+---
+- name: Check if Homebrew is installed
+  stat:
+    path: /opt/homebrew/bin/brew
+  register: brew_check
+
+- name: Install Homebrew
+  become_user: "{{ vm_name }}"
+  shell: |
+    NONINTERACTIVE=1 /bin/bash -c \
+      "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  when: not brew_check.stat.exists
+
+- name: Ensure brew is on PATH in shell profile
+  become_user: "{{ vm_name }}"
+  lineinfile:
+    path: "/Users/{{ vm_name }}/.zprofile"
+    line: 'eval "$(/opt/homebrew/bin/brew shellenv)"'
+    create: yes

@@ -1,0 +1,81 @@
+---
+integration_smoke_task:
+  name: Tart Integration (Smoke)
+  only_if: >-
+    $CIRRUS_PR != '' &&
+    $CIRRUS_PR_LABELS !=~ '(^|,)ci:integration-full(,|$)' &&
+    changesInclude(
+      '.cirrus.yml',
+      'ansible/**',
+      'assets/**',
+      'clawbox/**',
+      'packer/**',
+      'pyproject.toml',
+      'scripts/**',
+      'tests/integration_py/**',
+      'tests/logic_py/**'
+    )
+  required_pr_labels:
+    - "ci:integration-smoke"
+  auto_cancellation: $CIRRUS_PR != ''
+  timeout_in: 60m
+  macos_instance:
+    image: ghcr.io/cirruslabs/macos-runner:sequoia
+  env:
+    CLAWBOX_CI_EXHAUSTIVE: "false"
+    CLAWBOX_CI_PROFILE: "smoke"
+  bootstrap_script:
+    - ./scripts/ci/bootstrap.sh integration
+  test_script:
+    - test "$CLAWBOX_CI_EXHAUSTIVE" = "false"
+    - test "$CLAWBOX_CI_PROFILE" = "smoke"
+    - ./scripts/ci/run.sh integration
+  always:
+    diagnostics_script:
+      - mkdir -p ci-artifacts
+      - tart list --format json > ci-artifacts/tart-list.json || true
+      - tart list > ci-artifacts/tart-list.txt || true
+      - cp -R .clawbox ci-artifacts/clawbox-state || true
+      - cp -R ansible ci-artifacts/ansible || true
+    diagnostics_artifacts:
+      path: "ci-artifacts/**"
+
+integration_full_task:
+  name: Tart Integration (Full)
+  only_if: >-
+    $CIRRUS_PR != '' &&
+    changesInclude(
+      '.cirrus.yml',
+      'ansible/**',
+      'assets/**',
+      'clawbox/**',
+      'packer/**',
+      'pyproject.toml',
+      'scripts/**',
+      'tests/integration_py/**',
+      'tests/logic_py/**'
+    )
+  required_pr_labels:
+    - "ci:integration-full"
+  auto_cancellation: $CIRRUS_PR != ''
+  timeout_in: 120m
+  macos_instance:
+    image: ghcr.io/cirruslabs/macos-runner:sequoia
+  env:
+    CLAWBOX_CI_EXHAUSTIVE: "false"
+    CLAWBOX_CI_PROFILE: "full"
+  bootstrap_script:
+    - ./scripts/ci/bootstrap.sh integration
+  test_script:
+    - test "$CLAWBOX_CI_EXHAUSTIVE" = "false"
+    - test "$CLAWBOX_CI_PROFILE" = "full"
+    - ./scripts/ci/run.sh integration
+  always:
+    diagnostics_script:
+      - mkdir -p ci-artifacts
+      - tart list --format json > ci-artifacts/tart-list.json || true
+      - tart list > ci-artifacts/tart-list.txt || true
+      - cp -R .clawbox ci-artifacts/clawbox-state || true
+      - cp -R ansible ci-artifacts/ansible || true
+    diagnostics_artifacts:
+      path: "ci-artifacts/**"

@@ -1,0 +1,38 @@
+---
+- name: Ensure Cirrus Labs Homebrew tap is available
+  become_user: "{{ vm_name }}"
+  command: /opt/homebrew/bin/brew tap cirruslabs/cli
+  register: brew_tap_cirruslabs
+  changed_when: >-
+    not (
+      ((brew_tap_cirruslabs.stdout | default('')) ~ ' ' ~ (brew_tap_cirruslabs.stderr | default('')))
+      is search('already tapped')
+    )
+  environment:
+    PATH: "{{ clawbox_brew_env_path }}"
+
+- name: Install Tart Guest Agent via Homebrew
+  become_user: "{{ vm_name }}"
+  community.general.homebrew:
+    name: cirruslabs/cli/tart-guest-agent
+    state: present
+  environment:
+    PATH: "{{ clawbox_brew_env_path }}"
+
+- name: Install Tart Guest Agent LaunchDaemon
+  become: true
+  template:
+    src: org.cirruslabs.tart-guest-daemon.plist.j2
+    dest: /Library/LaunchDaemons/org.cirruslabs.tart-guest-daemon.plist
+    owner: root
+    group: wheel
+    mode: "0644"
+
+- name: Install Tart Guest Agent LaunchAgent
+  become: true
+  template:
+    src: org.cirruslabs.tart-guest-agent.plist.j2
+    dest: /Library/LaunchAgents/org.cirruslabs.tart-guest-agent.plist
+    owner: root
+    group: wheel
+    mode: "0644"

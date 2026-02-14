@@ -1,0 +1,118 @@
+---
+- name: Check if bootstrap admin user exists
+  command: id -u "{{ bootstrap_admin_user }}"
+  register: admin_check
+  failed_when: false
+  changed_when: false
+
+- name: Remove bootstrap admin user from SSH access group
+  command: dseditgroup -o edit -d "{{ bootstrap_admin_user }}" -t user com.apple.access_ssh
+  when: admin_check.rc == 0
+  failed_when: false
+
+- name: Remove bootstrap admin passwordless sudo
+  file:
+    path: "/etc/sudoers.d/{{ bootstrap_admin_user }}-nopasswd"
+    state: absent
+  become: true
+
+- name: Disable automatic login user preference
+  command: defaults delete /Library/Preferences/com.apple.loginwindow autoLoginUser
+  register: disable_auto_login_pref
+  failed_when: false
+  changed_when: disable_auto_login_pref.rc == 0
+  become: true
+  when: admin_check.rc == 0
+
+- name: Remove auto-login credentials file
+  file:
+    path: /etc/kcpassword
+    state: absent
+  become: true
+  when: admin_check.rc == 0
+
+- name: Check secure token status for provisioned user
+  command: sysadminctl -secureTokenStatus "{{ vm_name }}"
+  register: vm_secure_token_status
+  when: admin_check.rc == 0
+  failed_when: false
+  changed_when: false
+  become: true
+
+- name: Enable secure token for provisioned user using bootstrap admin credentials
+  command: >
+    sysadminctl -adminUser "{{ bootstrap_admin_user }}" -adminPassword "{{ bootstrap_admin_password }}"
+    -secureTokenOn "{{ vm_name }}" -password "{{ vm_password }}"
+  register: secure_token_enable
+  when:
+    - admin_check.rc == 0
+    - not (((vm_secure_token_status.stdout | default('')) ~ ' ' ~ (vm_secure_token_status.stderr | default(''))) is search('ENABLED'))
+  become: true
+  no_log: true
+
+- name: Re-check secure token status for provisioned user
+  command: sysadminctl -secureTokenStatus "{{ vm_name }}"
+  register: vm_secure_token_status_after
+  when: admin_check.rc == 0
+  failed_when: false
+  changed_when: false
+  become: true
+
+- name: Fail if provisioned user still lacks secure token
+  fail:
+    msg: >-
+      Cannot delete {{ bootstrap_admin_user }} because {{ vm_name }} does not have a secure token.
+      Ensure secure token transfer succeeded before cleanup.
+  when:
+    - admin_check.rc == 0
+    - not (((vm_secure_token_status_after.stdout | default('')) ~ ' ' ~ (vm_secure_token_status_after.stderr | default(''))) is search('ENABLED'))
+
+- name: Check active console user before bootstrap admin deletion
+  command: stat -f%Su /dev/console
+  register: console_user_before_delete
+  failed_when: false
+  changed_when: false
+  become: true
+  when: admin_check.rc == 0
+
+- name: Force logout bootstrap admin console session
+  shell: |
+    admin_uid="$(id -u {{ bootstrap_admin_user | quote }})"
+    launchctl bootout "gui/${admin_uid}" >/dev/null 2>&1 || true
+    pkill -KILL -u {{ bootstrap_admin_user | quote }} >/dev/null 2>&1 || true
+  args:
+    executable: /bin/bash
+  become: true
+  when:
+    - admin_check.rc == 0
+    - (console_user_before_delete.stdout | default('')) == bootstrap_admin_user
+
+- name: Wait until bootstrap admin is no longer the active console user
+  command: stat -f%Su /dev/console
+  register: console_user_after_logout
+  failed_when: false
+  changed_when: false
+  retries: 30
+  delay: 2
+  until: (console_user_after_logout.stdout | default('')) != bootstrap_admin_user
+  become: true
+  when: admin_check.rc == 0
+
+- name: Delete bootstrap admin user account
+  command: sysadminctl -deleteUser "{{ bootstrap_admin_user }}"
+  register: delete_admin_user
+  become: true
+  when: admin_check.rc == 0
+
+- name: Verify bootstrap admin user was removed
+  command: id -u "{{ bootstrap_admin_user }}"
+  register: admin_check_after
+  failed_when: admin_check_after.rc == 0
+  changed_when: false
+  when: admin_check.rc == 0
+
+- name: Remove stale bootstrap admin home directory
+  file:
+    path: "/Users/{{ bootstrap_admin_user }}"
+    state: absent
+  become: true
