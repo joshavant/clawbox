@@ -97,6 +97,7 @@ class IntegrationRunner:
     def cleanup_vm(self, vm_name: str) -> None:
         self.run_cmd(["tart", "stop", vm_name], check=False, capture_output=True)
         self.run_cmd(["tart", "delete", vm_name], check=False, capture_output=True)
+        self.marker_path(vm_name).unlink(missing_ok=True)
 
     def cleanup_all(self) -> None:
         for vm_name in {self.standard_vm_name, self.developer_vm_name, self.optional_vm_name}:

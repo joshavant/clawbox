@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -16,6 +17,83 @@ def _load_integration_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _integration_config(module, *, standard_vm_number: int = 1, developer_vm_number: int = 2, optional_vm_number: int = 2):
+    return module.IntegrationConfig(
+        profile="full",
+        standard_vm_number=standard_vm_number,
+        developer_vm_number=developer_vm_number,
+        optional_vm_number=optional_vm_number,
+        base_image_name="macos-base",
+        base_image_remote="ghcr.io/cirruslabs/macos-sequoia-vanilla:latest",
+        exhaustive=False,
+        keep_failed_artifacts=False,
+        allow_destructive_cleanup=False,
+        ansible_connect_timeout=8,
+        ansible_command_timeout=30,
+        remote_shell_timeout_seconds=120,
+    )
+
+
+def _fake_completed_process(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+
+def test_cleanup_vm_removes_marker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    module = _load_integration_module()
+    monkeypatch.setattr(module, "vm_base_name", lambda: "clawbox")
+    runner = module.IntegrationRunner(tmp_path, _integration_config(module, developer_vm_number=92))
+    marker = runner.marker_path(runner.developer_vm_name)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("profile: developer\n", encoding="utf-8")
+
+    calls: list[list[str]] = []
+
+    def fake_run_cmd(args, **_kwargs):
+        calls.append(args)
+        return _fake_completed_process(args)
+
+    monkeypatch.setattr(runner, "run_cmd", fake_run_cmd)
+
+    runner.cleanup_vm(runner.developer_vm_name)
+
+    assert calls == [
+        ["tart", "stop", runner.developer_vm_name],
+        ["tart", "delete", runner.developer_vm_name],
+    ]
+    assert not marker.exists()
+
+
+def test_cleanup_all_removes_all_markers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    module = _load_integration_module()
+    monkeypatch.setattr(module, "vm_base_name", lambda: "clawbox")
+    runner = module.IntegrationRunner(
+        tmp_path,
+        _integration_config(module, standard_vm_number=91, developer_vm_number=92, optional_vm_number=93),
+    )
+
+    vm_names = {runner.standard_vm_name, runner.developer_vm_name, runner.optional_vm_name}
+    markers = []
+    for vm_name in vm_names:
+        marker = runner.marker_path(vm_name)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("profile: standard\n", encoding="utf-8")
+        markers.append(marker)
+
+    calls: list[list[str]] = []
+
+    def fake_run_cmd(args, **_kwargs):
+        calls.append(args)
+        return _fake_completed_process(args)
+
+    monkeypatch.setattr(runner, "run_cmd", fake_run_cmd)
+
+    runner.cleanup_all()
+
+    assert len(calls) == len(vm_names) * 2
+    assert all(not marker.exists() for marker in markers)
+    assert not runner.tmp_root.exists()
 
 
 def test_keep_failed_artifacts_preserves_state_on_unexpected_exception(monkeypatch: pytest.MonkeyPatch):
