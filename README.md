@@ -70,7 +70,7 @@ clawbox up \
   --add-signal-cli-provisioning
 ```
 
-See the full list in [Optional Dependency Provisioning](#optional-dependency-provisioning-both-modes).
+See the full list in [Optional Dependency Provisioning](#optional-dependency-provisioning).
 
 ## Developer Mode (Advanced)
 
