@@ -380,6 +380,243 @@ def test_resolve_mutagen_auth_uses_bootstrap_admin_when_requested(
     assert attempted_users == [orchestrator.BOOTSTRAP_ADMIN_USER]
 
 
+def test_ensure_mutagen_keypair_returns_existing_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(orchestrator, "STATE_DIR", tmp_path / ".clawbox" / "state")
+    key_path = orchestrator._mutagen_key_path("clawbox-1")
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    key_path.write_text("private", encoding="utf-8")
+    key_path.with_suffix(".pub").write_text("public", encoding="utf-8")
+
+    resolved = orchestrator._ensure_mutagen_keypair("clawbox-1")
+    assert resolved == key_path
+
+
+def test_ensure_mutagen_keypair_maps_generation_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(orchestrator, "STATE_DIR", tmp_path / ".clawbox" / "state")
+    monkeypatch.setattr(
+        orchestrator.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(FileNotFoundError("missing ssh-keygen")),
+    )
+    with pytest.raises(UserFacingError, match="Command not found: ssh-keygen"):
+        orchestrator._ensure_mutagen_keypair("clawbox-1")
+
+    monkeypatch.setattr(
+        orchestrator.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["ssh-keygen"], returncode=1, stdout="", stderr="boom"
+        ),
+    )
+    with pytest.raises(UserFacingError, match="Could not generate Mutagen SSH key"):
+        orchestrator._ensure_mutagen_keypair("clawbox-1")
+
+
+def test_ensure_remote_mutagen_authorized_key_success_and_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    key_path = tmp_path / "id_ed25519"
+    key_path.write_text("private", encoding="utf-8")
+    key_path.with_suffix(".pub").write_text("ssh-ed25519 AAAATEST", encoding="utf-8")
+    monkeypatch.setattr(orchestrator, "_ensure_mutagen_keypair", lambda _vm_name: key_path)
+
+    seen_cmds: list[str] = []
+    monkeypatch.setattr(
+        orchestrator,
+        "_ansible_shell",
+        lambda _target, shell_cmd, **_kwargs: seen_cmds.append(shell_cmd)
+        or subprocess.CompletedProcess(args=["ansible"], returncode=0, stdout="", stderr=""),
+    )
+
+    orchestrator._ensure_remote_mutagen_authorized_key(
+        "clawbox-1",
+        "192.168.64.10",
+        ansible_user="clawbox-1",
+        ansible_password="pw",
+    )
+    assert seen_cmds
+    assert "authorized_keys" in seen_cmds[0]
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_ansible_shell",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["ansible"], returncode=1, stdout="", stderr="denied"
+        ),
+    )
+    with pytest.raises(UserFacingError, match="Could not install Mutagen SSH key"):
+        orchestrator._ensure_remote_mutagen_authorized_key(
+            "clawbox-1",
+            "192.168.64.10",
+            ansible_user="clawbox-1",
+            ansible_password="pw",
+        )
+
+
+def test_prepare_remote_mutagen_targets_maps_failure(monkeypatch: pytest.MonkeyPatch):
+    specs = [
+        orchestrator.SessionSpec(
+            kind="openclaw-source",
+            host_path=Path("/tmp/source"),
+            guest_path="/Users/Shared/clawbox-sync/openclaw-source",
+        ),
+        orchestrator.SessionSpec(
+            kind="openclaw-payload",
+            host_path=Path("/tmp/payload"),
+            guest_path="/Users/Shared/clawbox-sync/openclaw-payload",
+        ),
+    ]
+    seen_cmds: list[str] = []
+    monkeypatch.setattr(
+        orchestrator,
+        "_ansible_shell",
+        lambda _target, shell_cmd, **_kwargs: seen_cmds.append(shell_cmd)
+        or subprocess.CompletedProcess(args=["ansible"], returncode=0, stdout="", stderr=""),
+    )
+    orchestrator._prepare_remote_mutagen_targets(
+        "192.168.64.10",
+        specs,
+        ansible_user="clawbox-1",
+        ansible_password="pw",
+    )
+    assert seen_cmds
+    assert 'if [ -L "$path" ]; then rm "$path"; fi' in seen_cmds[0]
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_ansible_shell",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["ansible"], returncode=1, stdout="", stderr="bad"
+        ),
+    )
+    with pytest.raises(UserFacingError, match="Could not prepare guest directories"):
+        orchestrator._prepare_remote_mutagen_targets(
+            "192.168.64.10",
+            specs,
+            ansible_user="clawbox-1",
+            ansible_password="pw",
+        )
+
+
+def test_activate_mutagen_sync_requires_running_vm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    source = tmp_path / "source"
+    payload = tmp_path / "payload"
+    source.mkdir(parents=True, exist_ok=True)
+    payload.mkdir(parents=True, exist_ok=True)
+    tart = FakeTart()
+    tart.running["clawbox-1"] = False
+    monkeypatch.setattr(orchestrator, "mutagen_available", lambda: True)
+
+    with pytest.raises(UserFacingError, match="must be running before activating Mutagen sync"):
+        orchestrator._activate_mutagen_sync(
+            vm_name="clawbox-1",
+            openclaw_source=str(source),
+            openclaw_payload=str(payload),
+            signal_payload="",
+            tart=tart,
+            auth_mode="bootstrap_admin",
+        )
+
+
+def test_activate_mutagen_sync_success_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    source = tmp_path / "source"
+    payload = tmp_path / "payload"
+    source.mkdir(parents=True, exist_ok=True)
+    payload.mkdir(parents=True, exist_ok=True)
+
+    tart = FakeTart()
+    tart.running["clawbox-1"] = True
+    monkeypatch.setattr(orchestrator, "mutagen_available", lambda: True)
+    monkeypatch.setattr(orchestrator, "_resolve_vm_ip", lambda *_args, **_kwargs: "192.168.64.10")
+    monkeypatch.setattr(
+        orchestrator,
+        "_resolve_mutagen_auth",
+        lambda *_args, **_kwargs: ("clawbox-1", "pw"),
+    )
+    monkeypatch.setattr(orchestrator, "_ensure_remote_mutagen_authorized_key", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(orchestrator, "_ensure_mutagen_keypair", lambda _vm_name: tmp_path / "id_ed25519")
+    monkeypatch.setattr(orchestrator, "_prepare_remote_mutagen_targets", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        orchestrator,
+        "ensure_mutagen_ssh_alias",
+        lambda *_args, **_kwargs: "clawbox-mutagen-clawbox-1",
+    )
+    monkeypatch.setattr(orchestrator, "ensure_vm_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        orchestrator,
+        "_wait_for_mutagen_sync_ready",
+        lambda *_args, **_kwargs: ["/Users/Shared/clawbox-sync/signal-cli-payload/marker-missing"],
+    )
+    marked: list[str] = []
+    monkeypatch.setattr(orchestrator, "mark_mutagen_vm_active", lambda _state, vm: marked.append(vm))
+
+    out = _capture_stdout(
+        lambda: orchestrator._activate_mutagen_sync(
+            vm_name="clawbox-1",
+            openclaw_source=str(source),
+            openclaw_payload=str(payload),
+            signal_payload="",
+            tart=tart,
+            auth_mode="vm_user",
+        )
+    )
+    assert "Preparing Mutagen sync..." in out
+    assert "optional sync paths still warming up (continuing):" in out
+    assert "Mutagen sync active (bidirectional):" in out
+    assert marked == ["clawbox-1"]
+
+
+def test_activate_mutagen_sync_from_locks_requires_source_and_payload(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        orchestrator,
+        "_host_paths_from_locks",
+        lambda _vm_name: {
+            orchestrator.OPENCLAW_SOURCE_LOCK: "",
+            orchestrator.OPENCLAW_PAYLOAD_LOCK: "",
+            orchestrator.SIGNAL_PAYLOAD_LOCK: "",
+        },
+    )
+    with pytest.raises(UserFacingError, match="Could not determine developer source/payload host paths"):
+        orchestrator._activate_mutagen_sync_from_locks("clawbox-1", FakeTart())
+
+
+def test_activate_mutagen_sync_from_locks_forwards_expected_values(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        orchestrator,
+        "_host_paths_from_locks",
+        lambda _vm_name: {
+            orchestrator.OPENCLAW_SOURCE_LOCK: "/tmp/source",
+            orchestrator.OPENCLAW_PAYLOAD_LOCK: "/tmp/payload",
+            orchestrator.SIGNAL_PAYLOAD_LOCK: "/tmp/signal",
+        },
+    )
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(orchestrator, "_activate_mutagen_sync", lambda **kwargs: seen.update(kwargs))
+
+    orchestrator._activate_mutagen_sync_from_locks("clawbox-1", FakeTart())
+    assert seen["vm_name"] == "clawbox-1"
+    assert seen["openclaw_source"] == "/tmp/source"
+    assert seen["openclaw_payload"] == "/tmp/payload"
+    assert seen["signal_payload"] == "/tmp/signal"
+    assert seen["auth_mode"] == "bootstrap_admin"
+
+
+def test_deactivate_mutagen_sync_maps_mutagen_error(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        orchestrator,
+        "teardown_vm_sync",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(orchestrator.MutagenError("mutagen bad")),
+    )
+    with pytest.raises(UserFacingError, match="mutagen bad"):
+        orchestrator._deactivate_mutagen_sync("clawbox-1", flush=False)
+
+
 def test_build_sync_specs_ignores_node_modules_for_source() -> None:
     specs = orchestrator._build_sync_specs(
         "clawbox-1",

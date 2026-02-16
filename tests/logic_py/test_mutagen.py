@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from clawbox import mutagen as mutagen_mod
+from clawbox.tart import TartError
 
 
 def test_ensure_mutagen_ssh_alias_writes_include_and_host_block(
@@ -151,3 +153,143 @@ def test_vm_sessions_status_prefers_stdout(monkeypatch: pytest.MonkeyPatch) -> N
     )
 
     assert mutagen_mod.vm_sessions_status("clawbox-1") == "session status"
+
+
+def test_run_mutagen_maps_process_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        mutagen_mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(FileNotFoundError()),
+    )
+    with pytest.raises(mutagen_mod.MutagenError, match="Command not found: mutagen"):
+        mutagen_mod._run_mutagen(["sync", "list"])
+
+    monkeypatch.setattr(
+        mutagen_mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("boom")),
+    )
+    with pytest.raises(mutagen_mod.MutagenError, match="Could not run command"):
+        mutagen_mod._run_mutagen(["sync", "list"])
+
+
+def test_run_mutagen_raises_on_nonzero_with_details(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        mutagen_mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["mutagen", "sync", "list"], returncode=2, stdout="", stderr="bad"
+        ),
+    )
+    with pytest.raises(mutagen_mod.MutagenError, match="exit 2"):
+        mutagen_mod._run_mutagen(["sync", "list"])
+
+    monkeypatch.setattr(
+        mutagen_mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["mutagen", "sync", "list"], returncode=2, stdout="", stderr=""
+        ),
+    )
+    with pytest.raises(mutagen_mod.MutagenError, match="Command failed"):
+        mutagen_mod._run_mutagen(["sync", "list"])
+
+
+def test_ensure_main_ssh_config_include_handles_missing_trailing_newline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(mutagen_mod.Path, "home", lambda: tmp_path)
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir(parents=True, exist_ok=True)
+    main_config = ssh_dir / "config"
+    main_config.write_text("Host *", encoding="utf-8")
+
+    mutagen_mod._ensure_main_ssh_config_include()
+    text = main_config.read_text(encoding="utf-8")
+    assert text.endswith("Include ~/.ssh/clawbox_mutagen_config\n")
+    assert text.count("Include ~/.ssh/clawbox_mutagen_config") == 1
+
+    mutagen_mod._ensure_main_ssh_config_include()
+    text = main_config.read_text(encoding="utf-8")
+    assert text.count("Include ~/.ssh/clawbox_mutagen_config") == 1
+
+
+def test_remove_named_block_noop_when_file_missing(tmp_path: Path) -> None:
+    path = tmp_path / "missing.conf"
+    mutagen_mod._remove_named_block(path, "BEGIN", "END")
+    assert not path.exists()
+
+
+def test_ensure_vm_sessions_requires_mutagen(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mutagen_mod, "mutagen_available", lambda: False)
+    with pytest.raises(mutagen_mod.MutagenError, match="Command not found: mutagen"):
+        mutagen_mod.ensure_vm_sessions("clawbox-1", "alias", [])
+
+
+def test_vm_sessions_exist_false_when_mutagen_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mutagen_mod, "mutagen_available", lambda: False)
+    assert mutagen_mod.vm_sessions_exist("clawbox-1") is False
+
+
+def test_vm_sessions_status_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mutagen_mod, "mutagen_available", lambda: False)
+    assert mutagen_mod.vm_sessions_status("clawbox-1") == "mutagen not available"
+
+    monkeypatch.setattr(mutagen_mod, "mutagen_available", lambda: True)
+    monkeypatch.setattr(
+        mutagen_mod,
+        "_run_mutagen",
+        lambda args, **_kwargs: subprocess.CompletedProcess(
+            args=args, returncode=0, stdout="", stderr="only stderr"
+        ),
+    )
+    assert mutagen_mod.vm_sessions_status("clawbox-1") == "only stderr"
+
+
+def test_active_vm_registry_handles_invalid_payloads(tmp_path: Path) -> None:
+    path = tmp_path / "mutagen" / "active_vms.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    path.write_text("not-json", encoding="utf-8")
+    assert mutagen_mod._read_active_vms(path) == []
+
+    path.write_text("[]", encoding="utf-8")
+    assert mutagen_mod._read_active_vms(path) == []
+
+    path.write_text(json.dumps({"vms": "bad"}), encoding="utf-8")
+    assert mutagen_mod._read_active_vms(path) == []
+
+    path.write_text(json.dumps({"vms": ["clawbox-2", "", 123, "clawbox-2"]}), encoding="utf-8")
+    assert mutagen_mod._read_active_vms(path) == ["clawbox-2"]
+
+
+def test_clear_vm_active_and_teardown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    mutagen_mod.mark_vm_active(tmp_path, "clawbox-1")
+    mutagen_mod.mark_vm_active(tmp_path, "clawbox-2")
+    assert sorted(mutagen_mod.active_vms(tmp_path)) == ["clawbox-1", "clawbox-2"]
+
+    mutagen_mod.clear_vm_active(tmp_path, "clawbox-1")
+    assert mutagen_mod.active_vms(tmp_path) == ["clawbox-2"]
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        mutagen_mod, "terminate_vm_sessions", lambda vm_name, flush: seen.append(f"terminate:{vm_name}:{flush}")
+    )
+    monkeypatch.setattr(
+        mutagen_mod, "remove_mutagen_ssh_alias", lambda vm_name: seen.append(f"remove:{vm_name}")
+    )
+    mutagen_mod.teardown_vm_sync(tmp_path, "clawbox-2", flush=True)
+    assert seen == ["terminate:clawbox-2:True", "remove:clawbox-2"]
+    assert mutagen_mod.active_vms(tmp_path) == []
+
+
+def test_reconcile_vm_sync_ignores_tart_errors(tmp_path: Path) -> None:
+    mutagen_mod.mark_vm_active(tmp_path, "clawbox-2")
+
+    class _Tart:
+        def vm_running(self, _vm_name: str) -> bool:
+            raise TartError("agent unavailable")
+
+    torn_down: list[str] = []
+    mutagen_mod.reconcile_vm_sync(_Tart(), tmp_path)
+    assert torn_down == []
