@@ -9,7 +9,7 @@
     PATH: "{{ clawbox_brew_env_path }}"
   when: clawbox_profile != 'developer'
 
-- name: Validate developer source mount exists
+- name: Validate developer source sync path exists
   stat:
     path: "{{ openclaw_dev_source_dir }}"
   register: openclaw_dev_source_dir_stat
@@ -21,16 +21,16 @@
   register: openclaw_dev_source_pkg_stat
   when: clawbox_profile == 'developer'
 
-- name: Fail when developer source mount is unavailable
+- name: Fail when developer source sync path is unavailable
   fail:
     msg: >-
-      Developer profile requires a mounted OpenClaw source at {{ openclaw_dev_source_dir }}.
+      Developer profile requires a synced OpenClaw source at {{ openclaw_dev_source_dir }}.
       Launch with --developer --openclaw-source <path>.
   when:
     - clawbox_profile == 'developer'
     - not openclaw_dev_source_dir_stat.stat.exists
 
-- name: Fail when developer source mount is not an OpenClaw checkout
+- name: Fail when developer source sync path is not an OpenClaw checkout
   fail:
     msg: >-
       {{ openclaw_dev_source_dir }} does not contain package.json.
@@ -69,7 +69,7 @@
     CI: "true"
   when: clawbox_profile == 'developer'
 
-- name: Link mounted OpenClaw source as global openclaw command
+- name: Link synced OpenClaw source as global openclaw command
   become_user: "{{ vm_name }}"
   command: npm link
   args:

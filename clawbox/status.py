@@ -8,16 +8,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Sequence
 
-from clawbox.ansible_exec import run_ansible_shell
+from clawbox.auth import vm_user_credentials
 from clawbox.config import vm_base_name, vm_name_for
-from clawbox.secrets import read_vm_password
+from clawbox.remote_probe import RemoteShellContext, ansible_shell as ansible_shell_shared
+from clawbox.secrets import missing_secrets_message
 from clawbox.state import ProvisionMarker
 from clawbox.tart import TartClient
 
 MountProbeState = Literal["not_applicable", "ok", "unavailable"]
-SignalProbeState = Literal[
-    "not_applicable", "ok", "unavailable_no_credentials", "unavailable_probe_failed"
-]
+SignalProbeState = Literal["not_applicable"]
 
 _MOUNT_STATUS_RE = re.compile(r"['\"]?(?P<path>.+?)['\"]?=(?P<status>mounted|dir|missing|ok)")
 
@@ -30,9 +29,6 @@ class StatusContext:
     openclaw_source_mount: str
     openclaw_payload_mount: str
     signal_payload_mount: str
-    signal_sync_label: str
-    bootstrap_admin_user: str
-    bootstrap_admin_password: str
     ansible_connect_timeout_seconds: int
     ansible_command_timeout_seconds: int
 
@@ -44,7 +40,7 @@ class ProvisionMarkerReport:
 
 
 @dataclass
-class SharedMountsReport:
+class SyncPathsReport:
     note: str | None = None
     probe: MountProbeState = "not_applicable"
     paths: dict[str, str] = field(default_factory=dict)
@@ -64,13 +60,18 @@ class VMStatusReport:
     running: bool
     provision_marker: ProvisionMarkerReport
     ip: str | None = None
-    shared_mounts: SharedMountsReport = field(default_factory=SharedMountsReport)
+    sync_paths: SyncPathsReport = field(default_factory=SyncPathsReport)
     signal_payload_sync: SignalPayloadSyncReport = field(
         default_factory=lambda: SignalPayloadSyncReport(enabled=False)
     )
     warnings: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
+        sync_paths_payload = {
+            "note": self.sync_paths.note,
+            "probe": self.sync_paths.probe,
+            "paths": self.sync_paths.paths,
+        }
         return {
             "vm": self.vm,
             "exists": self.exists,
@@ -80,11 +81,7 @@ class VMStatusReport:
                 "data": self.provision_marker.data,
             },
             "ip": self.ip,
-            "shared_mounts": {
-                "note": self.shared_mounts.note,
-                "probe": self.shared_mounts.probe,
-                "paths": self.shared_mounts.paths,
-            },
+            "sync_paths": sync_paths_payload,
             "signal_payload_sync": {
                 "enabled": self.signal_payload_sync.enabled,
                 "probe": self.signal_payload_sync.probe,
@@ -147,41 +144,52 @@ def _ansible_shell(
     become: bool,
     context: StatusContext,
 ) -> subprocess.CompletedProcess[str]:
-    return run_ansible_shell(
+    remote_context = RemoteShellContext(
         ansible_dir=context.ansible_dir,
-        inventory_path="inventory/tart_inventory.py",
-        vm_name=vm_name,
-        shell_cmd=shell_cmd,
-        ansible_user=ansible_user,
-        ansible_password=ansible_password,
         connect_timeout_seconds=context.ansible_connect_timeout_seconds,
         command_timeout_seconds=context.ansible_command_timeout_seconds,
+        default_inventory_path="inventory/tart_inventory.py",
+    )
+    return ansible_shell_shared(
+        vm_name,
+        shell_cmd,
+        ansible_user=ansible_user,
+        ansible_password=ansible_password,
         become=become,
+        context=remote_context,
     )
 
 
-def _credential_candidates(
+def _sync_probe_credentials(
     vm_name: str, context: StatusContext
-) -> tuple[list[tuple[str, str]], list[str]]:
-    candidates: list[tuple[str, str]] = []
-    warnings: list[str] = []
-    if context.secrets_file.exists():
-        try:
-            candidates.append((vm_name, read_vm_password(context.secrets_file)))
-        except OSError as exc:
-            warnings.append(f"Could not read secrets file '{context.secrets_file}': {exc}")
-        except ValueError as exc:
-            warnings.append(str(exc))
-    candidates.append((context.bootstrap_admin_user, context.bootstrap_admin_password))
+) -> tuple[tuple[str, str] | None, list[str]]:
+    try:
+        return vm_user_credentials(
+            vm_name,
+            secrets_file=context.secrets_file,
+        ), []
+    except FileNotFoundError:
+        return None, [missing_secrets_message(context.secrets_file)]
+    except OSError as exc:
+        return None, [f"Could not read secrets file '{context.secrets_file}': {exc}"]
+    except ValueError as exc:
+        return None, [str(exc)]
 
-    deduped: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for cred in candidates:
-        if cred in seen:
-            continue
-        seen.add(cred)
-        deduped.append(cred)
-    return deduped, warnings
+
+def _status_probe_allowed(marker: ProvisionMarker | None) -> bool:
+    if marker is None:
+        return False
+    return marker.profile == "developer"
+
+
+def _status_probe_auth(
+    vm_name: str,
+    marker: ProvisionMarker | None,
+    context: StatusContext,
+) -> tuple[tuple[str, str] | None, list[str]]:
+    if not _status_probe_allowed(marker):
+        return None, []
+    return _sync_probe_credentials(vm_name, context)
 
 
 def _status_report_base(
@@ -199,6 +207,7 @@ def _status_report_base(
             "tailscale": marker.tailscale,
             "signal_cli": marker.signal_cli,
             "signal_payload": marker.signal_payload,
+            "sync_backend": marker.sync_backend,
         }
     return VMStatusReport(
         vm=vm_name,
@@ -223,72 +232,35 @@ def _status_mount_paths(
         return paths, None
     if marker:
         return [], None
-    return (
-        [context.openclaw_source_mount, context.openclaw_payload_mount, context.signal_payload_mount],
-        "no marker found; probing all known shared mount paths",
-    )
+    return ([], "no marker found; skipping remote sync-path probe")
 
 
-def _probe_shared_mounts(
+def _probe_sync_paths(
     vm_name: str,
     mount_paths: Sequence[str],
-    creds: Sequence[tuple[str, str]],
+    *,
+    ansible_user: str,
+    ansible_password: str,
     context: StatusContext,
-) -> tuple[MountProbeState, dict[str, str], tuple[str, str] | None]:
+) -> tuple[MountProbeState, dict[str, str]]:
     if not mount_paths:
-        return "not_applicable", {}, None
+        return "not_applicable", {}
 
     mount_cmd = build_mount_status_command(mount_paths)
-    for user, password in creds:
-        probe = _ansible_shell(
-            vm_name,
-            mount_cmd,
-            ansible_user=user,
-            ansible_password=password,
-            become=False,
-            context=context,
-        )
-        if probe.returncode != 0:
-            continue
-        parsed_statuses = parse_mount_statuses(probe.stdout, mount_paths)
-        if all(status == "unknown" for status in parsed_statuses.values()):
-            continue
-        return "ok", parsed_statuses, (user, password)
-
-    return "unavailable", {}, None
-
-
-def _probe_signal_sync_daemon(
-    vm_name: str,
-    creds: Sequence[tuple[str, str]],
-    chosen: tuple[str, str] | None,
-    context: StatusContext,
-) -> tuple[SignalProbeState, list[str]]:
-    credential = chosen
-    if credential is None and creds:
-        credential = creds[0]
-    if credential is None:
-        return "unavailable_no_credentials", []
-
-    daemon_cmd = (
-        f"(launchctl print system/{context.signal_sync_label} 2>&1 | "
-        "/usr/bin/egrep 'state =|pid =|Could not find service' || true); "
-        f"/usr/bin/tail -n 5 /tmp/{context.signal_sync_label}.log 2>/dev/null || true"
-    )
-    daemon_probe = _ansible_shell(
+    probe = _ansible_shell(
         vm_name,
-        daemon_cmd,
-        ansible_user=credential[0],
-        ansible_password=credential[1],
-        become=True,
+        mount_cmd,
+        ansible_user=ansible_user,
+        ansible_password=ansible_password,
+        become=False,
         context=context,
     )
-    if daemon_probe.returncode != 0:
-        return "unavailable_probe_failed", []
-    return (
-        "ok",
-        [line.rstrip() for line in daemon_probe.stdout.splitlines() if line.strip()],
-    )
+    if probe.returncode != 0:
+        return "unavailable", {}
+    parsed_statuses = parse_mount_statuses(probe.stdout, mount_paths)
+    if all(status == "unknown" for status in parsed_statuses.values()):
+        return "unavailable", {}
+    return "ok", parsed_statuses
 
 
 def _render_status_report_text(
@@ -303,9 +275,10 @@ def _render_status_report_text(
     print(f"  provision marker: {'present' if marker_file.exists() else 'missing'}")
     if marker:
         print(
-            "  marker profile/playwright/tailscale/signal_cli/signal_payload: "
+            "  marker profile/playwright/tailscale/signal_cli/signal_payload/sync_backend: "
             f"{marker.profile}/{str(marker.playwright).lower()}/{str(marker.tailscale).lower()}/"
-            f"{str(marker.signal_cli).lower()}/{str(marker.signal_payload).lower()}"
+            f"{str(marker.signal_cli).lower()}/{str(marker.signal_payload).lower()}/"
+            f"{marker.sync_backend or '(missing)'}"
         )
     if report.warnings:
         print("  warnings:")
@@ -319,28 +292,17 @@ def _render_status_report_text(
     if not report.running or not report.ip:
         return
 
-    if report.shared_mounts.note:
-        print(f"  note: {report.shared_mounts.note}")
+    if report.sync_paths.note:
+        print(f"  note: {report.sync_paths.note}")
 
-    if report.shared_mounts.probe == "unavailable":
-        print("  shared mounts: unavailable (remote probe failed)")
-    elif report.shared_mounts.probe == "ok":
-        print("  shared mounts:")
-        for path, status in report.shared_mounts.paths.items():
+    if report.sync_paths.probe == "unavailable":
+        print("  sync paths: unavailable (remote probe failed)")
+    elif report.sync_paths.probe == "ok":
+        print("  sync paths:")
+        for path, status in report.sync_paths.paths.items():
             print(f"    - {path}: {status}")
 
-    if not report.signal_payload_sync.enabled:
-        return
-    if report.signal_payload_sync.probe == "unavailable_no_credentials":
-        print("  signal payload sync daemon: unavailable (no credentials)")
-        return
-    if report.signal_payload_sync.probe == "unavailable_probe_failed":
-        print("  signal payload sync daemon: unavailable (probe failed)")
-        return
-    if report.signal_payload_sync.probe == "ok":
-        print("  signal payload sync daemon:")
-        for line in report.signal_payload_sync.lines:
-            print(f"    {line}")
+    return
 
 
 def _build_vm_status_report(
@@ -361,18 +323,24 @@ def _build_vm_status_report(
     if exists and running and report.ip:
         mount_paths, mount_note = _status_mount_paths(marker, context)
         if mount_note:
-            report.shared_mounts.note = mount_note
+            report.sync_paths.note = mount_note
 
-        creds, warnings = _credential_candidates(vm_name, context)
+        creds, warnings = _status_probe_auth(vm_name, marker, context)
         report.warnings.extend(warnings)
-        mount_probe, mount_statuses, chosen = _probe_shared_mounts(vm_name, mount_paths, creds, context)
-        report.shared_mounts.probe = mount_probe
-        report.shared_mounts.paths = mount_statuses
-
-        if marker and marker.signal_payload:
-            daemon_probe, daemon_lines = _probe_signal_sync_daemon(vm_name, creds, chosen, context)
-            report.signal_payload_sync.probe = daemon_probe
-            report.signal_payload_sync.lines = daemon_lines
+        if not mount_paths:
+            return marker_file, marker, report
+        if creds is None:
+            report.sync_paths.probe = "unavailable"
+            return marker_file, marker, report
+        mount_probe, mount_statuses = _probe_sync_paths(
+            vm_name,
+            mount_paths,
+            ansible_user=creds[0],
+            ansible_password=creds[1],
+            context=context,
+        )
+        report.sync_paths.probe = mount_probe
+        report.sync_paths.paths = mount_statuses
 
     return marker_file, marker, report
 

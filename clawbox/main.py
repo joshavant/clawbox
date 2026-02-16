@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from clawbox.cli import (
     add_optional_vm_number_args,
@@ -23,9 +24,11 @@ from clawbox.orchestrator import (
     main_guard,
     provision_vm,
     recreate,
+    reconcile_runtime,
     status_environment,
     status_vm,
     up,
+    watch_vm,
 )
 
 
@@ -144,6 +147,15 @@ def _handle_image_build(args: argparse.Namespace, __: object) -> None:
 
 def _handle_image_rebuild(args: argparse.Namespace, __: object) -> None:
     image_build(skip_init=args.skip_init, force=True)
+
+
+def _handle_watch_vm(args: argparse.Namespace, tart: object) -> None:
+    watch_vm(
+        vm_name=args.vm_name,
+        state_dir=Path(args.state_dir),
+        poll_seconds=args.poll_seconds,
+        tart=tart,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -267,6 +279,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     image_rebuild_parser.set_defaults(handler=_handle_image_rebuild)
 
+    watch_parser = subparsers.add_parser(
+        "_watch-vm",
+        help=argparse.SUPPRESS,
+    )
+    watch_parser.add_argument("vm_name")
+    watch_parser.add_argument("--state-dir", required=True)
+    watch_parser.add_argument("--poll-seconds", type=positive_int, default=2)
+    watch_parser.set_defaults(handler=_handle_watch_vm)
+
     return parser
 
 
@@ -285,8 +306,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    reconcile_commands = {"create", "launch", "provision", "up", "recreate", "down", "delete"}
 
     def run(tart):
+        command = getattr(args, "command", None)
+        if command in reconcile_commands:
+            reconcile_runtime(tart)
         handler = getattr(args, "handler", None)
         if handler is None:
             raise RuntimeError(f"Unhandled command: {getattr(args, 'command', '<missing>')}")

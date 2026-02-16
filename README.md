@@ -42,7 +42,7 @@ And, while you’re at it, you can easily provision your VM with things like Tai
 ## Who Clawbox Is For
 
 - **Standard users:** want one simple command to set up OpenClaw in its own VM.
-- **Developer users:** want to run multiple, concurrent VMs using host-mounted source/payload folders.
+- **Developer users:** want to run multiple, concurrent VMs using host-synced source/payload folders.
 
 ## Standard Mode (Default)
 
@@ -76,10 +76,11 @@ See the full list in [Optional Dependency Provisioning](#optional-dependency-pro
 
 `developer` is intended for managing custom payload workflows or developing OpenClaw:
 
-- Mounts your local OpenClaw source and payload into the VM.
+- Syncs your local OpenClaw source and payload into the VM.
 - Pass those paths with `--openclaw-source` and `--openclaw-payload`.
+- Uses bidirectional Mutagen sync for host<->VM source/payload changes.
 - Each VM can use different checkout/payload copies for concurrent work.
-- Mounted checkouts are linked as the VM's `openclaw` command.
+- Synced checkouts are linked as the VM's `openclaw` command.
 
 ### Single VM example:
 
@@ -120,7 +121,7 @@ Customize your VM with additional services by using these flags with `up`:
 
 Tailscale requires a manual, interactive approval step for permission prompts after VM creation.
 
-### signal-cli Payload Mounting (Developer-Only)
+### signal-cli Payload Sync (Developer-Only)
 
 To configure `signal-cli` with an existing configuration payload:
 
@@ -134,7 +135,7 @@ clawbox up --developer \
 
 Rules:
 
-- Clawbox seeds VM-local `~/.local/share/signal-cli`, then syncs VM changes back to host payload.
+- Clawbox links VM runtime `~/.local/share/signal-cli` to the synced payload path and relies on Mutagen bidirectional sync.
 - Single-writer locking is enforced for signal payload paths.
 
 Details: [`docs/signal-cli-payload-sync.md`](./docs/signal-cli-payload-sync.md)
@@ -153,6 +154,7 @@ This performs `down + delete + up` with the same profile/flags you originally pa
 
 - Homebrew
 - Node.js
+- Mutagen
 - OpenClaw
 - Terminal.app desktop shortcut
 - SSH access for `clawbox-<number>` (default password: `clawbox`)

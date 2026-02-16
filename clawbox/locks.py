@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import socket
 import shutil
-import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from clawbox.io_utils import atomic_write_text, read_text_or_empty
 from clawbox.tart import TartClient
 
 
@@ -67,32 +66,15 @@ def _lock_dir_for(spec: LockSpec, canonical_path: Path) -> Path:
 
 def _write_metadata(lock_dir: Path, spec: LockSpec, canonical_path: Path, vm_name: str) -> None:
     host_name = socket.gethostname().split(".")[0] if socket.gethostname() else "unknown-host"
-    _atomic_write_text(lock_dir / spec.path_field, f"{canonical_path}\n")
-    _atomic_write_text(lock_dir / "owner_vm", f"{vm_name}\n")
-    _atomic_write_text(lock_dir / "owner_host", f"{host_name}\n")
+    atomic_write_text(lock_dir / spec.path_field, f"{canonical_path}\n")
+    atomic_write_text(lock_dir / "owner_vm", f"{vm_name}\n")
+    atomic_write_text(lock_dir / "owner_host", f"{host_name}\n")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    _atomic_write_text(lock_dir / "updated_at", f"{now}\n")
-
-
-def _atomic_write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.tmp-", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(content)
-        Path(tmp_name).replace(path)
-    finally:
-        try:
-            Path(tmp_name).unlink(missing_ok=True)
-        except OSError:
-            pass
+    atomic_write_text(lock_dir / "updated_at", f"{now}\n")
 
 
 def _read_text(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return ""
+    return read_text_or_empty(path).strip()
 
 
 def _reclaim_lock_dir(lock_dir: Path) -> None:
@@ -186,3 +168,17 @@ def cleanup_locks_for_vm(vm_name: str) -> None:
             if owner_vm != vm_name:
                 continue
             shutil.rmtree(lock_dir, ignore_errors=True)
+
+
+def locked_path_for_vm(spec: LockSpec, vm_name: str) -> str:
+    lock_root = _lock_root(spec)
+    if not lock_root.exists():
+        return ""
+    for lock_dir in lock_root.iterdir():
+        if not lock_dir.is_dir():
+            continue
+        owner_vm = _read_text(lock_dir / "owner_vm")
+        if owner_vm != vm_name:
+            continue
+        return _read_text(lock_dir / spec.path_field)
+    return ""

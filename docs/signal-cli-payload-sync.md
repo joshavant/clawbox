@@ -2,17 +2,8 @@
 
 Clawbox supports a `signal-cli` payload mode for developer workflows:
 
-- Host payload directory is mounted into the VM at `/Volumes/My Shared Files/signal-cli-payload`
-- `signal-cli` runs against VM-local state at `~/.local/share/signal-cli`
-
-## Why This Exists
-
-`signal-cli` (Java) persists account state using Java NIO file-channel flush behavior (`java.nio.channels.FileChannel.force`). On Tart VirtioFS shared folders, this is not reliable for this workload. Running `signal-cli` directly against the mounted payload can produce `Inappropriate ioctl for device` errors.
-
-To keep runtime reliable while still keeping host/VM payloads aligned, Clawbox uses:
-
-1. Initial seed from mounted host payload -> VM-local `~/.local/share/signal-cli`
-2. Continuous background sync from VM-local state -> mounted host payload
+- Host payload directory is synchronized into the VM at `/Users/Shared/clawbox-sync/signal-cli-payload`
+- VM runtime path `/Users/<vm>/.local/share/signal-cli` is a symlink to that synced payload directory
 
 ## What Clawbox Configures
 
@@ -23,33 +14,32 @@ When you provision with:
 
 `signal-cli` provisioning itself is supported in both profiles. Payload mode is developer-only.
 
-Clawbox installs a root-managed LaunchDaemon in the VM:
+Clawbox configures payload mode by:
 
-- Label: `com.clawbox.signal-cli-payload-sync`
-- Long-running process with a 10-second sync loop
-- Runtime user: `clawbox-<number>`
-- Sync direction: VM local -> mounted host payload
-- Destination readiness check: sync runs only when a host marker file is visible at the mounted payload path
-- The readiness marker is excluded from rsync/delete operations so sync control state is not removed by payload mirroring
-- SIGTERM trap performs a final sync during graceful shutdown
-- Sync daemon logs to `/tmp/com.clawbox.signal-cli-payload-sync.log`
-- Repeated `rsync` failures are counted; after a threshold, the process exits so launchd restarts it
+1. validating the synced payload path and marker file,
+2. replacing `/Users/<vm>/.local/share/signal-cli` with a symlink to `/Users/Shared/clawbox-sync/signal-cli-payload`,
+3. relying on Mutagen bidirectional sync for host/VM updates.
 
-The daemon also sets `ExitTimeOut` so launchd gives it time to flush before force-killing it during service teardown.
+In `clawbox up --developer` flows that include signal payload mode, Clawbox establishes Mutagen sync twice:
+
+1. before provisioning starts (headless phase), and
+2. after post-provision GUI relaunch.
+
+In both phases, `signal-cli-payload` readiness is required before continuing so payload seeding/provisioning does not run against a stale or missing sync path.
 
 ## Manual Provision Safety Guard
 
 For manual workflows (`clawbox create` -> `clawbox launch` -> `clawbox provision`), `clawbox provision` performs a preflight check before running Ansible when `--enable-signal-payload` is set:
 
-- Required marker path in guest: `/Volumes/My Shared Files/signal-cli-payload/.clawbox-signal-payload-host-marker`
+- Required marker path in guest: `/Users/Shared/clawbox-sync/signal-cli-payload/.clawbox-signal-payload-host-marker`
 - If the marker is missing, provisioning fails early with an actionable error.
-- This prevents the seed step (`rsync --delete`) from running against an unintended local directory when the shared payload mount is not actually attached.
+- This prevents payload mode from wiring `signal-cli` to an unintended local directory when the synced payload path is not actually ready.
 
 ## Operational Model
 
 - No manual reconciliation is required in normal usage.
-- VM changes are checkpointed back to the host payload automatically.
-- If the VM is torn down, the host payload generally contains recent state from the latest sync interval.
+- VM and host changes flow through Mutagen bidirectional sync.
+- If the VM is torn down, payload state reflects the latest completed Mutagen synchronization.
 
 ## Single-Writer Locking
 
@@ -62,23 +52,17 @@ To prevent accidental double-writer corruption, Clawbox enforces a single runnin
 If a lock exists but its owner VM is no longer running, Clawbox automatically reclaims the stale lock.
 Lock enforcement is host-local only (it coordinates VMs on the same host machine, not across multiple hosts).
 
-## Shutdown Behavior
-
-On graceful macOS shutdown initiated inside the VM (Apple menu shutdown/restart), launchd sends `SIGTERM` to the sync daemon. The daemon traps that signal and performs a final `rsync` before exit.
-
-If shutdown is not graceful (host crash/power loss, forced kill), only the latest completed periodic checkpoint is guaranteed.
-
 ## Reliability Notes
 
 - This is not a transactional replication protocol.
-- Worst case (e.g., abrupt host crash/power loss): you can lose changes made since the last successful sync interval.
+- Worst case (e.g., abrupt host crash/power loss): you can lose changes made since the last successful synchronization cycle.
 - Use a single-writer model per payload path (do not run multiple VMs writing to the same `signal-cli` payload simultaneously).
 
 ## Troubleshooting
 
-Use `clawbox status <n>` to inspect shared mount state and sync daemon logs.
+Use `clawbox status <n>` to inspect synced path state.
 
-If `/Volumes/My Shared Files/signal-cli-payload` exists but reports as not mounted (`dir`/`missing`), restart the VM through Clawbox so launch arguments are reapplied:
+If `/Users/Shared/clawbox-sync/signal-cli-payload` is missing expected marker/files, restart the VM through Clawbox so Mutagen sessions are re-established:
 
 ```bash
 clawbox down <n>

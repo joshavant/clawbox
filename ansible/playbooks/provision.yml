@@ -37,9 +37,9 @@
     - role: tailscale
       when: clawbox_enable_tailscale | bool
       tags: [tailscale]
-    - role: shared_folders
+    - role: developer_sync_paths
       when: clawbox_enable_dev_mounts | bool
-      tags: [shared_folders, developer]
+      tags: [developer_sync_paths, developer]
     - role: openclaw
       tags: [openclaw]
     - role: signal_cli

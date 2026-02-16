@@ -10,6 +10,7 @@ class Clawbox < Formula
   depends_on "ansible"
   depends_on "hashicorp/tap/packer"
   depends_on "cirruslabs/cli/tart"
+  depends_on "mutagen-io/mutagen/mutagen"
 
   def install
     virtualenv_install_with_resources

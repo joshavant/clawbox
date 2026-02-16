@@ -14,6 +14,7 @@ class ProvisionMarker:
     signal_cli: bool
     signal_payload: bool
     provisioned_at: str
+    sync_backend: str = "mutagen"
 
     @classmethod
     def from_file(cls, marker_file: Path) -> "ProvisionMarker | None":
@@ -38,6 +39,7 @@ class ProvisionMarker:
             tailscale=b("tailscale"),
             signal_cli=b("signal_cli"),
             signal_payload=b("signal_payload"),
+            sync_backend=data.get("sync_backend", ""),
             provisioned_at=data.get("provisioned_at", ""),
         )
 
@@ -52,6 +54,7 @@ class ProvisionMarker:
                     f"tailscale: {'true' if self.tailscale else 'false'}",
                     f"signal_cli: {'true' if self.signal_cli else 'false'}",
                     f"signal_payload: {'true' if self.signal_payload else 'false'}",
+                    f"sync_backend: {self.sync_backend}",
                     f"provisioned_at: {self.provisioned_at}",
                 ]
             )
@@ -62,4 +65,3 @@ class ProvisionMarker:
 
 def current_utc_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-

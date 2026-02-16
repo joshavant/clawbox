@@ -13,16 +13,16 @@
     path: "/Users/{{ vm_name }}/.local/share"
     state: directory
 
-- name: Ensure signal-cli payload mount exists when payload mode is enabled
+- name: Ensure signal-cli payload sync path exists when payload mode is enabled
   stat:
     path: "{{ signal_cli_payload_mount }}"
   register: signal_cli_payload_mount_stat
   when: clawbox_enable_signal_payload | bool
 
-- name: Fail when signal-cli payload mount is missing
+- name: Fail when signal-cli payload sync path is missing
   fail:
     msg: >-
-      Expected signal-cli payload mount at {{ signal_cli_payload_mount }}.
+      Expected signal-cli payload sync path at {{ signal_cli_payload_mount }}.
       Launch the VM with --signal-cli-payload <path>.
   when:
     - clawbox_enable_signal_payload | bool
@@ -39,83 +39,88 @@
     msg: >-
       Expected signal-cli payload marker at
       {{ signal_cli_payload_mount }}/{{ signal_cli_payload_marker_filename }}.
-      This guard prevents destructive payload seeding when the shared payload mount
+      This guard prevents destructive payload seeding when the shared payload sync path
       is not attached correctly. Launch with --signal-cli-payload <path> and retry.
   when:
     - clawbox_enable_signal_payload | bool
     - not signal_cli_payload_marker_stat.stat.exists
 
-- name: Ensure local signal-cli data directory exists
+- name: Inspect local signal-cli data path when payload mode is enabled
   become_user: "{{ vm_name }}"
-  file:
+  stat:
     path: "/Users/{{ vm_name }}/{{ signal_cli_data_dir }}"
-    state: directory
+    follow: false
+  register: signal_cli_data_path_stat
+  when: clawbox_enable_signal_payload | bool
 
-- name: Seed local signal-cli data from payload mount when enabled
+- name: Preserve existing local signal-cli data in synced payload path before linking
   become_user: "{{ vm_name }}"
   command:
     argv:
       - /usr/bin/rsync
       - -a
-      - --delete
       - --itemize-changes
       - "--exclude={{ signal_cli_payload_marker_filename }}"
-      - "{{ signal_cli_payload_mount }}/"
       - "/Users/{{ vm_name }}/{{ signal_cli_data_dir }}/"
-  register: signal_cli_payload_seed_sync
-  changed_when: (signal_cli_payload_seed_sync.stdout | trim) != ""
-  when: clawbox_enable_signal_payload | bool
+      - "{{ signal_cli_payload_mount }}/"
+  register: signal_cli_payload_migration_sync
+  changed_when: (signal_cli_payload_migration_sync.stdout | trim) != ""
+  when:
+    - clawbox_enable_signal_payload | bool
+    - signal_cli_data_path_stat.stat.exists
+    - not (signal_cli_data_path_stat.stat.islnk | default(false))
+    - signal_cli_data_path_stat.stat.isdir | default(false)
 
-- name: Ensure signal-cli payload sync tooling directory exists
-  become: true
+- name: Remove non-symlink local signal-cli data path before linking
+  become_user: "{{ vm_name }}"
   file:
-    path: "{{ signal_cli_payload_sync_tooling_dir }}"
+    path: "/Users/{{ vm_name }}/{{ signal_cli_data_dir }}"
+    state: absent
+  when:
+    - clawbox_enable_signal_payload | bool
+    - signal_cli_data_path_stat.stat.exists
+    - not (signal_cli_data_path_stat.stat.islnk | default(false))
+
+- name: Ensure local signal-cli data path links to synced payload path when payload mode is enabled
+  become_user: "{{ vm_name }}"
+  file:
+    src: "{{ signal_cli_payload_mount }}"
+    dest: "/Users/{{ vm_name }}/{{ signal_cli_data_dir }}"
+    state: link
+    force: true
+  when: clawbox_enable_signal_payload | bool
+
+- name: Ensure local signal-cli data directory exists when payload mode is disabled
+  become_user: "{{ vm_name }}"
+  file:
+    path: "/Users/{{ vm_name }}/{{ signal_cli_data_dir }}"
     state: directory
-    mode: "0755"
-  when: clawbox_enable_signal_payload | bool
+  when: not (clawbox_enable_signal_payload | bool)
 
-- name: Install signal-cli payload sync script
+- name: Unload legacy signal-cli payload sync LaunchDaemon
   become: true
-  template:
-    src: sync-signal-cli-payload.sh.j2
-    dest: "{{ signal_cli_payload_sync_script_path }}"
-    mode: "0755"
-  when: clawbox_enable_signal_payload | bool
-
-- name: Install signal-cli payload sync LaunchDaemon
-  become: true
-  template:
-    src: com.clawbox.signal-cli-payload-sync.plist.j2
-    dest: "/Library/LaunchDaemons/{{ signal_cli_payload_sync_launchd_label }}.plist"
-    mode: "0644"
-  when: clawbox_enable_signal_payload | bool
-
-- name: Unload signal-cli payload sync LaunchDaemon before reload
-  become: true
-  command: launchctl bootout "system/{{ signal_cli_payload_sync_launchd_label }}"
+  command: launchctl bootout "system/com.clawbox.signal-cli-payload-sync"
   failed_when: false
   changed_when: false
   when: clawbox_enable_signal_payload | bool
 
-- name: Load signal-cli payload sync LaunchDaemon
+- name: Remove legacy signal-cli payload sync LaunchDaemon plist
   become: true
-  command:
-    argv:
-      - launchctl
-      - bootstrap
-      - system
-      - "/Library/LaunchDaemons/{{ signal_cli_payload_sync_launchd_label }}.plist"
+  file:
+    path: "/Library/LaunchDaemons/com.clawbox.signal-cli-payload-sync.plist"
+    state: absent
   when: clawbox_enable_signal_payload | bool
 
-- name: Kickstart signal-cli payload sync LaunchDaemon
+- name: Remove legacy signal-cli payload sync script
   become: true
-  command: launchctl kickstart -k "system/{{ signal_cli_payload_sync_launchd_label }}"
+  file:
+    path: "/Library/Clawbox/sync-signal-cli-payload.sh"
+    state: absent
   when: clawbox_enable_signal_payload | bool
 
 - name: Note signal-cli payload mode behavior
   debug:
     msg: >-
-      signal-cli payload mode seeds {{ signal_cli_data_dir }} from {{ signal_cli_payload_mount }}
-      at provision time and keeps it synced back to the host payload with a background LaunchDaemon
-      every {{ signal_cli_payload_sync_interval_seconds }}s.
+      signal-cli payload mode links /Users/{{ vm_name }}/{{ signal_cli_data_dir }} to
+      {{ signal_cli_payload_mount }} and relies on Mutagen bidirectional sync for host/VM updates.
   when: clawbox_enable_signal_payload | bool

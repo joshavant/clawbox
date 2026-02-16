@@ -1,0 +1,59 @@
+---
+- name: Ensure OpenClaw developer source sync path exists
+  stat:
+    path: "{{ openclaw_source_mount }}"
+  register: openclaw_source_mount_stat
+
+- name: Ensure OpenClaw developer payload sync path exists
+  stat:
+    path: "{{ openclaw_payload_mount }}"
+  register: openclaw_payload_mount_stat
+
+- name: Fail when OpenClaw developer source sync path is missing
+  fail:
+    msg: >-
+      Expected OpenClaw source sync path at {{ openclaw_source_mount }}.
+      Launch the VM with --developer --openclaw-source <path>.
+  when: not openclaw_source_mount_stat.stat.exists
+
+- name: Fail when OpenClaw developer payload sync path is missing
+  fail:
+    msg: >-
+      Expected OpenClaw payload sync path at {{ openclaw_payload_mount }}.
+      Launch the VM with --developer --openclaw-payload <path>.
+  when: not openclaw_payload_mount_stat.stat.exists
+
+- name: Ensure synced developer paths are owned by VM user without following symlinks
+  become: true
+  file:
+    path: "{{ item }}"
+    owner: "{{ vm_name }}"
+    group: staff
+    recurse: true
+    follow: false
+    state: directory
+  loop: >-
+    {{
+      [openclaw_source_mount, openclaw_payload_mount]
+      + ([signal_cli_payload_mount] if (clawbox_enable_signal_payload | bool) else [])
+    }}
+
+- name: Ensure ~/Developer directory exists
+  become_user: "{{ vm_name }}"
+  file:
+    path: "/Users/{{ vm_name }}/Developer"
+    state: directory
+
+- name: Symlink ~/Developer/openclaw to OpenClaw source sync path
+  become_user: "{{ vm_name }}"
+  file:
+    src: "{{ openclaw_source_mount }}"
+    dest: "{{ openclaw_dev_source_dir }}"
+    state: link
+
+- name: Symlink ~/.openclaw to OpenClaw payload sync path
+  become_user: "{{ vm_name }}"
+  file:
+    src: "{{ openclaw_payload_mount }}"
+    dest: "{{ openclaw_dev_payload_dir }}"
+    state: link

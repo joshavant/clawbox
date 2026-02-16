@@ -16,10 +16,10 @@ clawbox_enable_signal_payload: false
 openclaw_npm_version: latest
 clawbox_brew_env_path: "/opt/homebrew/bin:{{ ansible_facts['env']['PATH'] | default('/usr/bin:/bin:/usr/sbin:/sbin') }}"
 
-# VirtioFS mount points inside the guest
-signal_cli_payload_mount: "/Volumes/My Shared Files/signal-cli-payload"
-openclaw_source_mount: "/Volumes/My Shared Files/openclaw-source"
-openclaw_payload_mount: "/Volumes/My Shared Files/openclaw-payload"
+# Host<->guest sync target paths inside the guest
+signal_cli_payload_mount: "/Users/Shared/clawbox-sync/signal-cli-payload"
+openclaw_source_mount: "/Users/Shared/clawbox-sync/openclaw-source"
+openclaw_payload_mount: "/Users/Shared/clawbox-sync/openclaw-payload"
 
 # Guest-side paths
 openclaw_dev_source_dir: "/Users/{{ vm_name }}/Developer/openclaw"
@@ -27,11 +27,5 @@ openclaw_dev_payload_dir: "/Users/{{ vm_name }}/.openclaw"
 signal_cli_data_dir: ".local/share/signal-cli"  # relative to /Users/<vm_name>/
 vm_profile_photo_path: "/Library/User Pictures/Clawbox/clawbox-profile-photo.png"
 
-# signal-cli payload sync (VM local -> mounted host payload)
-signal_cli_payload_sync_launchd_label: "com.clawbox.signal-cli-payload-sync"
-signal_cli_payload_sync_tooling_dir: "/Library/Clawbox"
-signal_cli_payload_sync_script_path: "{{ signal_cli_payload_sync_tooling_dir }}/sync-signal-cli-payload.sh"
-signal_cli_payload_sync_interval_seconds: 10
-signal_cli_payload_sync_exit_timeout_seconds: 30
-signal_cli_payload_sync_max_consecutive_failures: 12
+# signal-cli payload sync marker guard
 signal_cli_payload_marker_filename: ".clawbox-signal-payload-host-marker"

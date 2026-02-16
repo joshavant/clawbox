@@ -42,12 +42,9 @@ def _context(tmp_path: Path) -> status_ops.StatusContext:
         ansible_dir=tmp_path / "ansible",
         state_dir=tmp_path / "state",
         secrets_file=tmp_path / "ansible" / "secrets.yml",
-        openclaw_source_mount="/Volumes/My Shared Files/openclaw-source",
-        openclaw_payload_mount="/Volumes/My Shared Files/openclaw-payload",
-        signal_payload_mount="/Volumes/My Shared Files/signal-cli-payload",
-        signal_sync_label="com.clawbox.signal-cli-payload-sync",
-        bootstrap_admin_user="admin",
-        bootstrap_admin_password="admin",
+        openclaw_source_mount="/Users/Shared/clawbox-sync/openclaw-source",
+        openclaw_payload_mount="/Users/Shared/clawbox-sync/openclaw-payload",
+        signal_payload_mount="/Users/Shared/clawbox-sync/signal-cli-payload",
         ansible_connect_timeout_seconds=8,
         ansible_command_timeout_seconds=30,
     )
@@ -73,26 +70,34 @@ def test_format_mount_statuses_outputs_lines() -> None:
     assert "/b: dir" in rendered
 
 
-def test_credential_candidates_warn_on_read_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sync_probe_credentials_warn_on_read_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = _context(tmp_path)
     ctx.secrets_file.parent.mkdir(parents=True, exist_ok=True)
     ctx.secrets_file.write_text("vm_password: ignored\n", encoding="utf-8")
-    monkeypatch.setattr(status_ops, "read_vm_password", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("boom")))
+    monkeypatch.setattr(
+        status_ops,
+        "vm_user_credentials",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("boom")),
+    )
 
-    creds, warnings = status_ops._credential_candidates("clawbox-1", ctx)
-    assert ("admin", "admin") in creds
+    creds, warnings = status_ops._sync_probe_credentials("clawbox-1", ctx)
+    assert creds is None
     assert any("Could not read secrets file" in warning for warning in warnings)
 
 
-def test_credential_candidates_dedupes_same_credentials(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sync_probe_credentials_resolves_vm_user_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = _context(tmp_path)
     ctx.secrets_file.parent.mkdir(parents=True, exist_ok=True)
     ctx.secrets_file.write_text("vm_password: admin\n", encoding="utf-8")
-    monkeypatch.setattr(status_ops, "read_vm_password", lambda *_args, **_kwargs: "admin")
+    monkeypatch.setattr(
+        status_ops,
+        "vm_user_credentials",
+        lambda vm_name, **_kwargs: (vm_name, "vm-password"),
+    )
 
-    creds, warnings = status_ops._credential_candidates("admin", ctx)
+    creds, warnings = status_ops._sync_probe_credentials("clawbox-1", ctx)
     assert warnings == []
-    assert creds == [("admin", "admin")]
+    assert creds == ("clawbox-1", "vm-password")
 
 
 def test_status_mount_paths_for_standard_marker(tmp_path: Path) -> None:
@@ -111,20 +116,20 @@ def test_status_mount_paths_for_standard_marker(tmp_path: Path) -> None:
     assert note is None
 
 
-def test_probe_shared_mounts_not_applicable(tmp_path: Path) -> None:
+def test_probe_sync_paths_not_applicable(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
-    probe, statuses, chosen = status_ops._probe_shared_mounts(
+    probe, statuses = status_ops._probe_sync_paths(
         "clawbox-1",
         [],
-        [("user", "pw")],
-        ctx,
+        ansible_user="user",
+        ansible_password="pw",
+        context=ctx,
     )
     assert probe == "not_applicable"
     assert statuses == {}
-    assert chosen is None
 
 
-def test_probe_shared_mounts_unavailable_when_no_parseable_status(
+def test_probe_sync_paths_unavailable_when_no_parseable_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ctx = _context(tmp_path)
@@ -135,41 +140,15 @@ def test_probe_shared_mounts_unavailable_when_no_parseable_status(
             args=["ansible"], returncode=0, stdout="nonsense", stderr=""
         ),
     )
-    probe, statuses, chosen = status_ops._probe_shared_mounts(
+    probe, statuses = status_ops._probe_sync_paths(
         "clawbox-1",
         [ctx.openclaw_source_mount],
-        [("user", "pw")],
-        ctx,
+        ansible_user="user",
+        ansible_password="pw",
+        context=ctx,
     )
     assert probe == "unavailable"
     assert statuses == {}
-    assert chosen is None
-
-
-def test_probe_signal_sync_daemon_no_credentials(tmp_path: Path) -> None:
-    ctx = _context(tmp_path)
-    probe, lines = status_ops._probe_signal_sync_daemon("clawbox-1", [], None, ctx)
-    assert probe == "unavailable_no_credentials"
-    assert lines == []
-
-
-def test_probe_signal_sync_daemon_probe_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    ctx = _context(tmp_path)
-    monkeypatch.setattr(
-        status_ops,
-        "_ansible_shell",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            args=["ansible"], returncode=1, stdout="", stderr="failed"
-        ),
-    )
-    probe, lines = status_ops._probe_signal_sync_daemon(
-        "clawbox-1",
-        [("admin", "admin")],
-        ("admin", "admin"),
-        ctx,
-    )
-    assert probe == "unavailable_probe_failed"
-    assert lines == []
 
 
 def test_render_status_report_text_unavailable_branches(tmp_path: Path) -> None:
@@ -192,19 +171,19 @@ def test_render_status_report_text_unavailable_branches(tmp_path: Path) -> None:
         running=True,
         provision_marker=status_ops.ProvisionMarkerReport(present=True, data={"profile": "developer"}),
         ip="192.168.64.10",
-        shared_mounts=status_ops.SharedMountsReport(probe="unavailable"),
+        sync_paths=status_ops.SyncPathsReport(probe="unavailable"),
         signal_payload_sync=status_ops.SignalPayloadSyncReport(
             enabled=True,
-            probe="unavailable_probe_failed",
+            probe="not_applicable",
             lines=[],
         ),
     )
     out = _capture(lambda: status_ops._render_status_report_text("clawbox-1", marker_file, marker, report))
-    assert "shared mounts: unavailable" in out
-    assert "signal payload sync daemon: unavailable (probe failed)" in out
+    assert "sync paths: unavailable" in out
+    assert "signal payload sync daemon:" not in out
 
 
-def test_render_status_report_text_unavailable_no_credentials(tmp_path: Path) -> None:
+def test_render_status_report_text_does_not_render_signal_daemon_section(tmp_path: Path) -> None:
     marker_file = tmp_path / "state" / "clawbox-1.provisioned"
     marker_file.parent.mkdir(parents=True, exist_ok=True)
     marker_file.write_text("profile: developer\n", encoding="utf-8")
@@ -217,12 +196,12 @@ def test_render_status_report_text_unavailable_no_credentials(tmp_path: Path) ->
         ip="192.168.64.10",
         signal_payload_sync=status_ops.SignalPayloadSyncReport(
             enabled=True,
-            probe="unavailable_no_credentials",
+            probe="not_applicable",
             lines=[],
         ),
     )
     out = _capture(lambda: status_ops._render_status_report_text("clawbox-1", marker_file, None, report))
-    assert "signal payload sync daemon: unavailable (no credentials)" in out
+    assert "signal payload sync daemon:" not in out
 
 
 def test_candidate_vm_names_include_tart_vms_and_marker_only(tmp_path: Path) -> None:
@@ -237,6 +216,28 @@ def test_candidate_vm_names_include_tart_vms_and_marker_only(tmp_path: Path) -> 
     )
 
     assert status_ops._candidate_vm_names(tart, ctx) == ["clawbox-2", "clawbox-3"]
+
+
+def test_status_mount_paths_marker_missing_skips_remote_probe(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    paths, note = status_ops._status_mount_paths(None, ctx)
+    assert paths == []
+    assert note == "no marker found; skipping remote sync-path probe"
+
+
+def test_status_vm_no_marker_does_not_call_remote_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ctx = _context(tmp_path)
+    tart = FakeTart([{"Name": "clawbox-1", "Running": True, "IP": "192.168.64.10"}])
+    called = {"probe": 0}
+    monkeypatch.setattr(
+        status_ops,
+        "_probe_sync_paths",
+        lambda *_args, **_kwargs: called.__setitem__("probe", called["probe"] + 1) or ("ok", {}),
+    )
+
+    out = _capture(lambda: status_ops.status_vm(1, tart, as_json=False, context=ctx))
+    assert called["probe"] == 0
+    assert "no marker found; skipping remote sync-path probe" in out
 
 
 def test_status_environment_json_no_vms(tmp_path: Path) -> None:

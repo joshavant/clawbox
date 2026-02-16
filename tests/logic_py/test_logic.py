@@ -72,6 +72,12 @@ def isolated_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(orchestrator, "ANSIBLE_DIR", tmp_path / "ansible")
     monkeypatch.setattr(orchestrator, "SECRETS_FILE", tmp_path / "ansible" / "secrets.yml")
     monkeypatch.setattr(orchestrator, "STATE_DIR", tmp_path / ".clawbox" / "state")
+    monkeypatch.setattr(orchestrator, "start_vm_watcher", lambda *_args, **_kwargs: 9999)
+    monkeypatch.setattr(orchestrator, "stop_vm_watcher", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(orchestrator, "mutagen_available", lambda: True)
+    monkeypatch.setattr(orchestrator, "_activate_mutagen_sync", lambda **_kwargs: None)
+    monkeypatch.setattr(orchestrator, "_activate_mutagen_sync_from_locks", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(orchestrator, "_deactivate_mutagen_sync", lambda *_args, **_kwargs: None)
     (tmp_path / "ansible").mkdir(parents=True, exist_ok=True)
     yield tmp_path
 
@@ -184,7 +190,7 @@ def test_launch_vm_surfaces_early_tart_exit(isolated_paths, monkeypatch):
     tart.exists["clawbox-1"] = True
     tart.next_proc = DummyProcess(pid=4321, poll_value=1)
     monkeypatch.setattr(orchestrator, "_acquire_locks", lambda *args, **kwargs: None)
-    monkeypatch.setattr(orchestrator, "_tail_lines", lambda *args, **kwargs: "simulated tart failure")
+    monkeypatch.setattr(orchestrator, "tail_lines", lambda *args, **kwargs: "simulated tart failure")
 
     with pytest.raises(UserFacingError, match="tart run exited before 'clawbox-1' reached a running state"):
         orchestrator.launch_vm(
@@ -203,7 +209,7 @@ def test_launch_vm_surfaces_running_timeout(isolated_paths, monkeypatch):
     tart.exists["clawbox-1"] = True
     monkeypatch.setattr(orchestrator, "_acquire_locks", lambda *args, **kwargs: None)
     monkeypatch.setattr(orchestrator, "wait_for_vm_running", lambda *args, **kwargs: False)
-    monkeypatch.setattr(orchestrator, "_tail_lines", lambda *args, **kwargs: "simulated timeout")
+    monkeypatch.setattr(orchestrator, "tail_lines", lambda *args, **kwargs: "simulated timeout")
 
     with pytest.raises(UserFacingError, match="did not enter running state within 30s"):
         orchestrator.launch_vm(
@@ -217,11 +223,18 @@ def test_launch_vm_surfaces_running_timeout(isolated_paths, monkeypatch):
         )
 
 
-def test_launch_vm_running_vm_skips_lock_and_marker_work(isolated_paths, monkeypatch):
+def test_launch_vm_running_vm_refreshes_lock_and_marker_work(isolated_paths, monkeypatch):
     tart = FakeTart()
     vm_name = "clawbox-1"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
+
+    source = isolated_paths / "source"
+    payload = isolated_paths / "payload"
+    signal = isolated_paths / "signal"
+    source.mkdir(parents=True, exist_ok=True)
+    payload.mkdir(parents=True, exist_ok=True)
+    signal.mkdir(parents=True, exist_ok=True)
 
     lock_calls: list[str] = []
     marker_calls: list[str] = []
@@ -240,16 +253,16 @@ def test_launch_vm_running_vm_skips_lock_and_marker_work(isolated_paths, monkeyp
         lambda: orchestrator.launch_vm(
             vm_number=1,
             profile="developer",
-            openclaw_source="/path/that/does/not/matter",
-            openclaw_payload="/path/that/does/not/matter",
-            signal_payload="/path/that/does/not/matter",
+            openclaw_source=str(source),
+            openclaw_payload=str(payload),
+            signal_payload=str(signal),
             headless=False,
             tart=tart,
         )
     )
     assert "VM 'clawbox-1' is already running." in out
-    assert lock_calls == []
-    assert marker_calls == []
+    assert lock_calls == ["called"]
+    assert marker_calls == ["called"]
 
 
 def test_up_standard_rejects_developer_flags(isolated_paths):
@@ -279,7 +292,15 @@ def test_up_first_run_uses_headless_then_gui(isolated_paths, monkeypatch):
         calls.append(f"create:{vm_number}")
         _tart.exists["clawbox-1"] = True
 
-    def fake_launch(vm_number, profile, openclaw_source, openclaw_payload, signal_payload, headless, tart):
+    def fake_launch(
+        vm_number,
+        profile,
+        openclaw_source,
+        openclaw_payload,
+        signal_payload,
+        headless,
+        tart,
+    ):
         calls.append(f"launch:headless={str(headless).lower()}")
         tart.running["clawbox-1"] = True
 
@@ -320,6 +341,72 @@ def test_up_first_run_uses_headless_then_gui(isolated_paths, monkeypatch):
 
     assert calls == ["create:1", "launch:headless=true", "provision", "launch:headless=false"]
     assert "Clawbox is ready: clawbox-1" in out
+    assert "VM window may appear before host<->VM sync is ready." not in out
+    assert "Wait for 'Clawbox is ready:' before logging in or editing synced files." not in out
+
+
+def test_up_first_run_developer_includes_sync_readiness_note(isolated_paths, monkeypatch):
+    tart = FakeTart()
+    calls: list[str] = []
+    orchestrator.ensure_secrets_file(create_if_missing=True)
+
+    def fake_create(vm_number, _tart):
+        calls.append(f"create:{vm_number}")
+        _tart.exists["clawbox-1"] = True
+
+    def fake_launch(
+        vm_number,
+        profile,
+        openclaw_source,
+        openclaw_payload,
+        signal_payload,
+        headless,
+        tart,
+    ):
+        calls.append(f"launch:headless={str(headless).lower()}")
+        tart.running["clawbox-1"] = True
+
+    def fake_provision(opts, _tart):
+        calls.append("provision")
+        marker = orchestrator.ProvisionMarker(
+            vm_name="clawbox-1",
+            profile=opts.profile,
+            playwright=opts.enable_playwright,
+            tailscale=opts.enable_tailscale,
+            signal_cli=opts.enable_signal_cli,
+            signal_payload=opts.enable_signal_payload,
+            provisioned_at="2026-01-01T00:00:00Z",
+            sync_backend="mutagen",
+        )
+        marker.write(orchestrator.STATE_DIR / "clawbox-1.provisioned")
+
+    monkeypatch.setattr(orchestrator, "_acquire_locks", lambda *args, **kwargs: None)
+    monkeypatch.setattr(orchestrator, "_preflight_developer_mounts", lambda *args, **kwargs: None)
+    monkeypatch.setattr(orchestrator, "create_vm", fake_create)
+    monkeypatch.setattr(orchestrator, "launch_vm", fake_launch)
+    monkeypatch.setattr(orchestrator, "provision_vm", fake_provision)
+    monkeypatch.setattr(orchestrator, "wait_for_vm_running", lambda *args, **kwargs: True)
+
+    out = capture_stdout(
+        lambda: orchestrator.up(
+            UpOptions(
+                vm_number=1,
+                profile="developer",
+                openclaw_source=str(isolated_paths),
+                openclaw_payload=str(isolated_paths),
+                signal_payload="",
+                enable_playwright=False,
+                enable_tailscale=False,
+                enable_signal_cli=False,
+            ),
+            tart,
+        )
+    )
+
+    assert calls == ["create:1", "launch:headless=true", "provision", "launch:headless=false"]
+    assert "Clawbox is ready: clawbox-1" in out
+    assert "VM window may appear before host<->VM sync is ready." in out
+    assert "Wait for 'Clawbox is ready:' before logging in or editing synced files." in out
 
 
 def test_up_marker_match_skips_provision(isolated_paths, monkeypatch):
@@ -536,6 +623,40 @@ def test_up_marker_mismatch_requires_recreate(isolated_paths, monkeypatch):
         )
 
 
+def test_up_developer_marker_missing_sync_backend_requires_recreate(isolated_paths, monkeypatch):
+    tart = FakeTart()
+    vm_name = "clawbox-1"
+    tart.exists[vm_name] = True
+    tart.running[vm_name] = True
+    orchestrator.ensure_secrets_file(create_if_missing=True)
+    orchestrator.ProvisionMarker(
+        vm_name=vm_name,
+        profile="developer",
+        playwright=False,
+        tailscale=False,
+        signal_cli=False,
+        signal_payload=False,
+        provisioned_at="2026-01-01T00:00:00Z",
+        sync_backend="",
+    ).write(orchestrator.STATE_DIR / f"{vm_name}.provisioned")
+    monkeypatch.setattr(orchestrator, "_acquire_locks", lambda *args, **kwargs: None)
+
+    with pytest.raises(UserFacingError, match="legacy provision marker format"):
+        orchestrator.up(
+            UpOptions(
+                vm_number=1,
+                profile="developer",
+                openclaw_source=str(isolated_paths),
+                openclaw_payload=str(isolated_paths),
+                signal_payload="",
+                enable_playwright=False,
+                enable_tailscale=False,
+                enable_signal_cli=False,
+            ),
+            tart,
+        )
+
+
 def test_provision_standard_accepts_optional_flags(isolated_paths, monkeypatch):
     tart = FakeTart()
     tart.exists["clawbox-1"] = True
@@ -564,6 +685,107 @@ def test_provision_standard_accepts_optional_flags(isolated_paths, monkeypatch):
     assert "clawbox_enable_playwright=true" in seen_playbook_cmd
     assert "clawbox_enable_tailscale=true" in seen_playbook_cmd
     assert "clawbox_enable_signal_cli=true" in seen_playbook_cmd
+
+
+def test_provision_developer_writes_sync_backend_mutagen(isolated_paths, monkeypatch):
+    tart = FakeTart()
+    vm_name = "clawbox-1"
+    tart.exists[vm_name] = True
+    tart.running[vm_name] = True
+    marker_file = orchestrator.STATE_DIR / f"{vm_name}.provisioned"
+    marker_file.unlink(missing_ok=True)
+    orchestrator.ensure_secrets_file(create_if_missing=True)
+    monkeypatch.setattr(orchestrator, "_resolve_vm_ip", lambda *args, **kwargs: "192.168.64.10")
+    monkeypatch.setattr(orchestrator, "_activate_mutagen_sync_from_locks", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        orchestrator.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr=""),
+    )
+
+    orchestrator.provision_vm(
+        ProvisionOptions(
+            vm_number=1,
+            profile="developer",
+            enable_playwright=False,
+            enable_tailscale=False,
+            enable_signal_cli=False,
+            enable_signal_payload=False,
+        ),
+        tart,
+    )
+    marker = orchestrator.ProvisionMarker.from_file(marker_file)
+    assert marker is not None
+    assert marker.sync_backend == "mutagen"
+
+
+def test_provision_developer_activates_sync_from_locks_by_default(isolated_paths, monkeypatch):
+    tart = FakeTart()
+    vm_name = "clawbox-1"
+    tart.exists[vm_name] = True
+    tart.running[vm_name] = True
+    orchestrator.ensure_secrets_file(create_if_missing=True)
+    monkeypatch.setattr(orchestrator, "_resolve_vm_ip", lambda *args, **kwargs: "192.168.64.10")
+
+    activations: list[str] = []
+    monkeypatch.setattr(
+        orchestrator,
+        "_activate_mutagen_sync_from_locks",
+        lambda _vm_name, _tart: activations.append(_vm_name),
+    )
+    monkeypatch.setattr(
+        orchestrator.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr=""),
+    )
+
+    orchestrator.provision_vm(
+        ProvisionOptions(
+            vm_number=1,
+            profile="developer",
+            enable_playwright=False,
+            enable_tailscale=False,
+            enable_signal_cli=False,
+            enable_signal_payload=False,
+        ),
+        tart,
+    )
+
+    assert activations == [vm_name]
+
+
+def test_provision_developer_can_skip_sync_reactivation(isolated_paths, monkeypatch):
+    tart = FakeTart()
+    vm_name = "clawbox-1"
+    tart.exists[vm_name] = True
+    tart.running[vm_name] = True
+    orchestrator.ensure_secrets_file(create_if_missing=True)
+    monkeypatch.setattr(orchestrator, "_resolve_vm_ip", lambda *args, **kwargs: "192.168.64.10")
+    monkeypatch.setattr(
+        orchestrator,
+        "_activate_mutagen_sync_from_locks",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("should skip mutagen reactivation")
+        ),
+    )
+    monkeypatch.setattr(
+        orchestrator.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr=""),
+    )
+
+    orchestrator.provision_vm(
+        ProvisionOptions(
+            vm_number=1,
+            profile="developer",
+            enable_playwright=False,
+            enable_tailscale=False,
+            enable_signal_cli=False,
+            enable_signal_payload=False,
+            skip_sync_activation=True,
+        ),
+        tart,
+    )
 
 
 def test_up_signal_payload_requires_explicit_signal_cli_flag(isolated_paths):
@@ -755,7 +977,15 @@ def test_up_developer_runs_mount_preflight(isolated_paths, monkeypatch):
     def fake_create(vm_number, _tart):
         _tart.exists["clawbox-1"] = True
 
-    def fake_launch(vm_number, profile, openclaw_source, openclaw_payload, signal_payload, headless, tart):
+    def fake_launch(
+        vm_number,
+        profile,
+        openclaw_source,
+        openclaw_payload,
+        signal_payload,
+        headless,
+        tart,
+    ):
         tart.running["clawbox-1"] = True
 
     def fake_provision(opts, _tart):
@@ -813,9 +1043,9 @@ def test_preflight_developer_mounts_cleans_probe_files_on_error(tmp_path: Path, 
     payload_dir.mkdir(parents=True, exist_ok=True)
     signal_dir.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr(orchestrator, "OPENCLAW_SOURCE_MOUNT", "/Volumes/My Shared Files/openclaw-source")
-    monkeypatch.setattr(orchestrator, "OPENCLAW_PAYLOAD_MOUNT", "/Volumes/My Shared Files/openclaw-payload")
-    monkeypatch.setattr(orchestrator, "SIGNAL_PAYLOAD_MOUNT", "/Volumes/My Shared Files/signal-cli-payload")
+    monkeypatch.setattr(orchestrator, "OPENCLAW_SOURCE_MOUNT", "/Users/Shared/clawbox-sync/openclaw-source")
+    monkeypatch.setattr(orchestrator, "OPENCLAW_PAYLOAD_MOUNT", "/Users/Shared/clawbox-sync/openclaw-payload")
+    monkeypatch.setattr(orchestrator, "SIGNAL_PAYLOAD_MOUNT", "/Users/Shared/clawbox-sync/signal-cli-payload")
     monkeypatch.setattr(orchestrator, "_ansible_shell", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("probe failed")))
 
     with pytest.raises(RuntimeError, match="probe failed"):
@@ -985,23 +1215,23 @@ def test_ip_vm_fails_when_vm_not_running(isolated_paths):
 
 def test_parse_mount_statuses_handles_wrapped_output():
     mount_paths = [
-        "/Volumes/My Shared Files/openclaw-source",
-        "/Volumes/My Shared Files/openclaw-payload",
+        "/Users/Shared/clawbox-sync/openclaw-source",
+        "/Users/Shared/clawbox-sync/openclaw-payload",
     ]
     stdout = "\n".join(
         [
             "clawbox-2 | CHANGED | rc=0 >>",
-            "\t/Volumes/My Shared Files/openclaw-source=mounted",
-            "prefix text /Volumes/My Shared Files/openclaw-payload=dir suffix text",
+            "\t/Users/Shared/clawbox-sync/openclaw-source=mounted",
+            "prefix text /Users/Shared/clawbox-sync/openclaw-payload=dir suffix text",
         ]
     )
 
     parsed = orchestrator._parse_mount_statuses(stdout, mount_paths)
-    assert parsed["/Volumes/My Shared Files/openclaw-source"] == "mounted"
-    assert parsed["/Volumes/My Shared Files/openclaw-payload"] == "dir"
+    assert parsed["/Users/Shared/clawbox-sync/openclaw-source"] == "mounted"
+    assert parsed["/Users/Shared/clawbox-sync/openclaw-payload"] == "dir"
 
 
-def test_status_vm_reports_mounts_and_signal_daemon(isolated_paths, monkeypatch):
+def test_status_vm_reports_mounts_without_signal_daemon_probe(isolated_paths, monkeypatch):
     tart = FakeTart()
     vm_name = "clawbox-1"
     tart.exists[vm_name] = True
@@ -1025,11 +1255,7 @@ def test_status_vm_reports_mounts_and_signal_daemon(isolated_paths, monkeypatch)
             f"{orchestrator.SIGNAL_PAYLOAD_MOUNT}=dir",
         ]
     )
-    daemon_stdout = "state = running\npid = 123\nlog-line"
-    responses = [
-        subprocess.CompletedProcess(args=["ansible"], returncode=0, stdout=mount_stdout, stderr=""),
-        subprocess.CompletedProcess(args=["ansible"], returncode=0, stdout=daemon_stdout, stderr=""),
-    ]
+    responses = [subprocess.CompletedProcess(args=["ansible"], returncode=0, stdout=mount_stdout, stderr="")]
 
     def fake_ansible_shell(*args, **kwargs):
         return responses.pop(0)
@@ -1037,13 +1263,12 @@ def test_status_vm_reports_mounts_and_signal_daemon(isolated_paths, monkeypatch)
     monkeypatch.setattr(status_ops, "_ansible_shell", fake_ansible_shell)
 
     out = capture_stdout(lambda: orchestrator.status_vm(1, tart))
-    assert "shared mounts:" in out
+    assert "sync paths:" in out
     assert f"{orchestrator.SIGNAL_PAYLOAD_MOUNT}: dir" in out
-    assert "signal payload sync daemon:" in out
-    assert "state = running" in out
+    assert "signal payload sync daemon:" not in out
 
 
-def test_status_vm_json_reports_mounts_and_signal_daemon(isolated_paths, monkeypatch):
+def test_status_vm_json_reports_mounts_without_signal_daemon_probe(isolated_paths, monkeypatch):
     tart = FakeTart()
     vm_name = "clawbox-1"
     tart.exists[vm_name] = True
@@ -1067,11 +1292,7 @@ def test_status_vm_json_reports_mounts_and_signal_daemon(isolated_paths, monkeyp
             f"{orchestrator.SIGNAL_PAYLOAD_MOUNT}=mounted",
         ]
     )
-    daemon_stdout = "state = running\npid = 123\nlog-line"
-    responses = [
-        subprocess.CompletedProcess(args=["ansible"], returncode=0, stdout=mount_stdout, stderr=""),
-        subprocess.CompletedProcess(args=["ansible"], returncode=0, stdout=daemon_stdout, stderr=""),
-    ]
+    responses = [subprocess.CompletedProcess(args=["ansible"], returncode=0, stdout=mount_stdout, stderr="")]
 
     def fake_ansible_shell(*args, **kwargs):
         return responses.pop(0)
@@ -1085,66 +1306,55 @@ def test_status_vm_json_reports_mounts_and_signal_daemon(isolated_paths, monkeyp
     assert parsed["running"] is True
     assert parsed["provision_marker"]["present"] is True
     assert parsed["provision_marker"]["data"]["profile"] == "developer"
-    assert parsed["shared_mounts"]["probe"] == "ok"
-    assert parsed["shared_mounts"]["paths"][orchestrator.SIGNAL_PAYLOAD_MOUNT] == "mounted"
+    assert parsed["sync_paths"]["probe"] == "ok"
+    assert parsed["sync_paths"]["paths"][orchestrator.SIGNAL_PAYLOAD_MOUNT] == "mounted"
     assert parsed["signal_payload_sync"]["enabled"] is True
-    assert parsed["signal_payload_sync"]["probe"] == "ok"
-    assert "state = running" in parsed["signal_payload_sync"]["lines"]
+    assert parsed["signal_payload_sync"]["probe"] == "not_applicable"
+    assert parsed["signal_payload_sync"]["lines"] == []
 
 
-def test_status_vm_reports_warning_when_secrets_file_is_invalid(isolated_paths, monkeypatch):
+def test_status_vm_skips_remote_probe_when_marker_missing(isolated_paths, monkeypatch):
     tart = FakeTart()
     vm_name = "clawbox-1"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     orchestrator.SECRETS_FILE.write_text("not_vm_password: nope\n", encoding="utf-8")
 
-    mount_stdout = "\n".join(
-        [
-            f"{orchestrator.OPENCLAW_SOURCE_MOUNT}=dir",
-            f"{orchestrator.OPENCLAW_PAYLOAD_MOUNT}=dir",
-            f"{orchestrator.SIGNAL_PAYLOAD_MOUNT}=dir",
-        ]
-    )
+    probes = {"count": 0}
     monkeypatch.setattr(
         status_ops,
         "_ansible_shell",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            args=["ansible"], returncode=0, stdout=mount_stdout, stderr=""
-        ),
+        lambda *args, **kwargs: probes.__setitem__("count", probes["count"] + 1)
+        or subprocess.CompletedProcess(args=["ansible"], returncode=0, stdout="", stderr=""),
     )
 
     out = capture_stdout(lambda: orchestrator.status_vm(1, tart))
-    assert "warnings:" in out
-    assert "Could not parse vm_password" in out
+    assert probes["count"] == 0
+    assert "note: no marker found; skipping remote sync-path probe" in out
+    assert "warnings:" not in out
 
 
-def test_status_vm_json_reports_warning_when_secrets_file_is_invalid(isolated_paths, monkeypatch):
+def test_status_vm_json_skips_remote_probe_when_marker_missing(isolated_paths, monkeypatch):
     tart = FakeTart()
     vm_name = "clawbox-1"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     orchestrator.SECRETS_FILE.write_text("not_vm_password: nope\n", encoding="utf-8")
 
-    mount_stdout = "\n".join(
-        [
-            f"{orchestrator.OPENCLAW_SOURCE_MOUNT}=dir",
-            f"{orchestrator.OPENCLAW_PAYLOAD_MOUNT}=dir",
-            f"{orchestrator.SIGNAL_PAYLOAD_MOUNT}=dir",
-        ]
-    )
+    probes = {"count": 0}
     monkeypatch.setattr(
         status_ops,
         "_ansible_shell",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            args=["ansible"], returncode=0, stdout=mount_stdout, stderr=""
-        ),
+        lambda *args, **kwargs: probes.__setitem__("count", probes["count"] + 1)
+        or subprocess.CompletedProcess(args=["ansible"], returncode=0, stdout="", stderr=""),
     )
 
     out = capture_stdout(lambda: orchestrator.status_vm(1, tart, as_json=True))
     parsed = json.loads(out)
-    assert parsed["warnings"]
-    assert any("Could not parse vm_password" in line for line in parsed["warnings"])
+    assert probes["count"] == 0
+    assert parsed["sync_paths"]["probe"] == "not_applicable"
+    assert parsed["sync_paths"]["note"] == "no marker found; skipping remote sync-path probe"
+    assert parsed["warnings"] == []
 
 
 def test_image_build_runs_init_then_build(isolated_paths, monkeypatch):

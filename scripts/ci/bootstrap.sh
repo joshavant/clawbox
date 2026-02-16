@@ -57,7 +57,8 @@ install_logic_deps_linux() {
 
 install_fast_deps_macos() {
 	brew_update_once
-	brew install ansible ansible-lint shellcheck shfmt yamllint jq actionlint
+	brew tap mutagen-io/mutagen
+	brew install ansible ansible-lint shellcheck shfmt yamllint jq actionlint mutagen
 	ansible-galaxy collection install community.general
 }
 
@@ -69,7 +70,8 @@ install_logic_deps_macos() {
 
 install_integration_deps_macos() {
 	brew_update_once
-	brew install cirruslabs/cli/tart ansible
+	brew tap mutagen-io/mutagen
+	brew install cirruslabs/cli/tart ansible mutagen
 	ansible-galaxy collection install community.general
 }
 

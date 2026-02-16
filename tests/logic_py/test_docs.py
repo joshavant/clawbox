@@ -28,7 +28,7 @@ def test_openclaw_role_links_developer_source_without_runtime_wrappers() -> None
     )
     assert "Run fast-fail OpenClaw source build gate" in role
     assert "command: pnpm exec tsdown" in role
-    assert "Link mounted OpenClaw source as global openclaw command" in role
+    assert "Link synced OpenClaw source as global openclaw command" in role
     assert "command: npm link" in role
     assert "openclaw-dev" not in role
 

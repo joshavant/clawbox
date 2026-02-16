@@ -48,6 +48,7 @@ def render_formula(version_tag: str, sha256: str) -> str:
         "  depends_on \"ansible\"\n"
         "  depends_on \"hashicorp/tap/packer\"\n"
         "  depends_on \"cirruslabs/cli/tart\"\n"
+        "  depends_on \"mutagen-io/mutagen/mutagen\"\n"
         "\n"
         "  def install\n"
         "    virtualenv_install_with_resources\n"

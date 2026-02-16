@@ -224,6 +224,19 @@ def test_parse_status_without_number(monkeypatch: pytest.MonkeyPatch):
     assert args.number is None
 
 
+def test_parse_internal_watch_command(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["clawbox", "_watch-vm", "clawbox-1", "--state-dir", "/tmp/state", "--poll-seconds", "3"],
+    )
+    args = main_cli.parse_args()
+    assert args.command == "_watch-vm"
+    assert args.vm_name == "clawbox-1"
+    assert args.state_dir == "/tmp/state"
+    assert args.poll_seconds == 3
+
+
 def test_main_dispatches_image_build(monkeypatch: pytest.MonkeyPatch):
     args = argparse.Namespace(handler=main_cli._handle_image_build, skip_init=False)
     called: dict[str, object] = {}
@@ -245,3 +258,59 @@ def test_main_dispatches_image_build(monkeypatch: pytest.MonkeyPatch):
     main_cli.main()
 
     assert called == {"skip_init": False, "force": False}
+
+
+def test_main_reconciles_runtime_for_normal_commands(monkeypatch: pytest.MonkeyPatch):
+    args = argparse.Namespace(handler=main_cli._handle_down, command="down", number=3)
+    called: dict[str, object] = {}
+
+    monkeypatch.setattr(main_cli, "parse_args", lambda: args)
+    monkeypatch.setattr(main_cli, "main_guard", lambda fn: fn("fake-tart"))
+    monkeypatch.setattr(main_cli, "reconcile_runtime", lambda tart: called.update({"reconcile": tart}))
+    monkeypatch.setattr(
+        main_cli,
+        "down_vm",
+        lambda vm_number, tart: called.update({"vm_number": vm_number, "tart": tart}),
+    )
+
+    main_cli.main()
+
+    assert called == {"reconcile": "fake-tart", "vm_number": 3, "tart": "fake-tart"}
+
+
+def test_main_does_not_reconcile_runtime_for_status(monkeypatch: pytest.MonkeyPatch):
+    args = argparse.Namespace(handler=main_cli._handle_status, command="status", number=1, json=False)
+    called: dict[str, object] = {}
+
+    monkeypatch.setattr(main_cli, "parse_args", lambda: args)
+    monkeypatch.setattr(main_cli, "main_guard", lambda fn: fn("fake-tart"))
+    monkeypatch.setattr(main_cli, "reconcile_runtime", lambda tart: called.update({"reconcile": tart}))
+    monkeypatch.setattr(
+        main_cli,
+        "status_vm",
+        lambda vm_number, tart, as_json=False: called.update(
+            {"vm_number": vm_number, "tart": tart, "as_json": as_json}
+        ),
+    )
+
+    main_cli.main()
+
+    assert called == {"vm_number": 1, "tart": "fake-tart", "as_json": False}
+
+
+def test_main_does_not_reconcile_runtime_for_ip(monkeypatch: pytest.MonkeyPatch):
+    args = argparse.Namespace(handler=main_cli._handle_ip, command="ip", number=2)
+    called: dict[str, object] = {}
+
+    monkeypatch.setattr(main_cli, "parse_args", lambda: args)
+    monkeypatch.setattr(main_cli, "main_guard", lambda fn: fn("fake-tart"))
+    monkeypatch.setattr(main_cli, "reconcile_runtime", lambda tart: called.update({"reconcile": tart}))
+    monkeypatch.setattr(
+        main_cli,
+        "ip_vm",
+        lambda vm_number, tart: called.update({"vm_number": vm_number, "tart": tart}),
+    )
+
+    main_cli.main()
+
+    assert called == {"vm_number": 2, "tart": "fake-tart"}

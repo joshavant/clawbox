@@ -56,8 +56,8 @@ include = ["clawbox*"]
   "ansible/roles/setup_assistant/templates/clawbox-apply-wallpaper.sh.j2",
   "ansible/roles/setup_assistant/templates/com.clawbox.apply-wallpaper.plist.j2",
 ]
-"share/clawbox/ansible/roles/shared_folders/tasks" = [
-  "ansible/roles/shared_folders/tasks/main.yml",
+"share/clawbox/ansible/roles/developer_sync_paths/tasks" = [
+  "ansible/roles/developer_sync_paths/tasks/main.yml",
 ]
 "share/clawbox/ansible/roles/signal_cli/tasks" = [
   "ansible/roles/signal_cli/tasks/main.yml",

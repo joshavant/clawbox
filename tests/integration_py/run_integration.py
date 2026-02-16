@@ -11,15 +11,30 @@ import textwrap
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from clawbox.ansible_exec import build_ansible_env, build_ansible_shell_command
-from clawbox.config import vm_base_name
+from clawbox.config import group_var_scalar, vm_base_name
+from clawbox.locks import (
+    OPENCLAW_PAYLOAD_LOCK,
+    OPENCLAW_SOURCE_LOCK,
+    SIGNAL_PAYLOAD_LOCK,
+    locked_path_for_vm,
+)
 from clawbox.secrets import ensure_vm_password_file, read_vm_password
 from clawbox.tart import TartClient
 
 
 class IntegrationError(RuntimeError):
     """Raised when an integration assertion fails."""
+
+
+SIGNAL_PAYLOAD_MOUNT = group_var_scalar(
+    "signal_cli_payload_mount", "/Users/Shared/clawbox-sync/signal-cli-payload"
+)
+SIGNAL_PAYLOAD_MARKER_FILENAME = group_var_scalar(
+    "signal_cli_payload_marker_filename", ".clawbox-signal-payload-host-marker"
+)
 
 
 @dataclass
@@ -85,11 +100,21 @@ class IntegrationRunner:
             cwd=cwd or self.project_dir,
         )
 
+    def wait_for_vm_ip(self, vm_name: str, timeout_seconds: int = 120) -> str:
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            ip = self.tart.ip(vm_name)
+            if ip:
+                return ip
+            time.sleep(2)
+        self.fail(f"Assertion failed: '{vm_name}' did not report an IP address within {timeout_seconds}s")
+        return ""
+
     def clawbox_cmd(self, *args: str) -> list[str]:
         return ["python3", "-m", "clawbox", *args]
 
     def ensure_prerequisites(self) -> None:
-        for cmd in ("tart", "ansible", "ansible-playbook"):
+        for cmd in ("tart", "ansible", "ansible-playbook", "mutagen"):
             self.require_cmd(cmd)
         if os.uname().sysname != "Darwin":
             self.fail("Error: Integration tests require macOS (Darwin).")
@@ -143,6 +168,24 @@ class IntegrationRunner:
 
     def marker_path(self, vm_name: str) -> Path:
         return self.project_dir / ".clawbox" / "state" / f"{vm_name}.provisioned"
+
+    def watcher_record_path(self, vm_name: str) -> Path:
+        return self.project_dir / ".clawbox" / "state" / "watchers" / f"{vm_name}.json"
+
+    def assert_eventually(
+        self,
+        condition: Callable[[], bool],
+        *,
+        timeout_seconds: int,
+        poll_seconds: int,
+        failure_message: str,
+    ) -> None:
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            if condition():
+                return
+            time.sleep(poll_seconds)
+        self.fail(failure_message)
 
     def assert_file_contains(self, file: Path, needle: str) -> None:
         if not file.exists():
@@ -256,6 +299,10 @@ class IntegrationRunner:
         (self.fixture_source_dir / "tools" / "tsdown-mock").mkdir(parents=True, exist_ok=True)
         self.fixture_payload_dir.mkdir(parents=True, exist_ok=True)
         self.fixture_signal_payload_dir.mkdir(parents=True, exist_ok=True)
+        (self.fixture_signal_payload_dir / "host-fixture-note.txt").write_text(
+            "host fixture payload\n",
+            encoding="utf-8",
+        )
 
         (self.fixture_source_dir / "package.json").write_text(
             textwrap.dedent(
@@ -375,6 +422,23 @@ class IntegrationRunner:
         )
         os.chmod(gateway_watch_script, 0o755)
 
+    def seed_pnpm_like_symlink_chain(self) -> None:
+        pnpm_modules = self.fixture_source_dir / "node_modules" / ".pnpm" / "node_modules"
+        pnpm_modules.mkdir(parents=True, exist_ok=True)
+        packages_clawdbot = self.fixture_source_dir / "packages" / "clawdbot"
+        packages_clawdbot.mkdir(parents=True, exist_ok=True)
+
+        package_nm_link = packages_clawdbot / "node_modules"
+        if package_nm_link.exists() or package_nm_link.is_symlink():
+            package_nm_link.unlink()
+        # This mirrors pnpm-style relative links that can recurse deeply when symlinks are followed.
+        os.symlink("../../../node_modules/.pnpm/node_modules", package_nm_link)
+
+        clawdbot_link = pnpm_modules / "clawdbot"
+        if clawdbot_link.exists() or clawdbot_link.is_symlink():
+            clawdbot_link.unlink()
+        os.symlink("../../../packages/clawdbot", clawdbot_link)
+
     def create_openclaw_invalid_gate_fixture(self) -> tuple[Path, Path]:
         invalid_source_dir = self.tmp_root / "openclaw-source-invalid"
         invalid_payload_dir = self.tmp_root / "openclaw-payload-invalid"
@@ -444,6 +508,83 @@ class IntegrationRunner:
             self.fail(
                 "Assertion failed: expected no provision marker after tsdown-gate provisioning failure"
             )
+
+    def run_developer_signal_payload_marker_guard_flow(self) -> None:
+        print(f"==> integration: developer signal payload marker guard ({self.developer_vm_name})")
+        vm_name = self.developer_vm_name
+        marker = self.marker_path(vm_name)
+        host_marker = self.fixture_signal_payload_dir / SIGNAL_PAYLOAD_MARKER_FILENAME
+        guest_marker = f"{SIGNAL_PAYLOAD_MOUNT}/{SIGNAL_PAYLOAD_MARKER_FILENAME}"
+
+        self.cleanup_vm(vm_name)
+        marker.unlink(missing_ok=True)
+        try:
+            self.run_cmd(self.clawbox_cmd("create", str(self.config.developer_vm_number)))
+            self.run_cmd(
+                self.clawbox_cmd(
+                    "launch",
+                    "--developer",
+                    str(self.config.developer_vm_number),
+                    "--openclaw-source",
+                    str(self.fixture_source_dir),
+                    "--openclaw-payload",
+                    str(self.fixture_payload_dir),
+                    "--signal-cli-payload",
+                    str(self.fixture_signal_payload_dir),
+                    "--headless",
+                )
+            )
+            vm_ip = self.wait_for_vm_ip(vm_name, timeout_seconds=120)
+
+            host_marker.unlink(missing_ok=True)
+            wipe_guest_marker_cmd = build_ansible_shell_command(
+                inventory_path=f"{vm_ip},",
+                vm_name=vm_ip,
+                shell_cmd=f"rm -f {shlex.quote(guest_marker)}",
+                ansible_user="admin",
+                ansible_password="admin",
+                connect_timeout_seconds=self.config.ansible_connect_timeout,
+                command_timeout_seconds=self.config.ansible_command_timeout,
+                become=False,
+            )
+            self.run_cmd(
+                wipe_guest_marker_cmd,
+                check=False,
+                capture_output=True,
+                env=build_ansible_env(),
+                cwd=self.project_dir / "ansible",
+            )
+
+            provision_failed = self.run_cmd(
+                self.clawbox_cmd(
+                    "provision",
+                    str(self.config.developer_vm_number),
+                    "--developer",
+                    "--add-signal-cli-provisioning",
+                    "--enable-signal-payload",
+                ),
+                check=False,
+                capture_output=True,
+            )
+            output = f"{provision_failed.stdout}\n{provision_failed.stderr}"
+            if provision_failed.returncode == 0:
+                self.fail(
+                    "Assertion failed: expected developer provision to fail when signal payload marker is missing\n"
+                    f"----- output -----\n{output}"
+                )
+            if "signal-cli payload marker was not visible in the guest" not in output:
+                self.fail(
+                    "Assertion failed: expected signal payload marker guard failure message\n"
+                    f"----- output -----\n{output}"
+                )
+            if guest_marker not in output:
+                self.fail(
+                    "Assertion failed: expected missing marker path in provision failure output\n"
+                    f"----- output -----\n{output}"
+                )
+        finally:
+            self.cleanup_vm(vm_name)
+            marker.unlink(missing_ok=True)
 
     def run_standard_flow(self) -> None:
         print(f"==> integration: standard flow ({self.standard_vm_name})")
@@ -543,8 +684,9 @@ class IntegrationRunner:
         print(f"==> integration: developer flow ({self.developer_vm_name})")
         self.cleanup_vm(self.developer_vm_name)
         self.marker_path(self.developer_vm_name).unlink(missing_ok=True)
+        self.seed_pnpm_like_symlink_chain()
 
-        up_output = self.run_cmd(
+        up_result = self.run_cmd(
             self.clawbox_cmd(
                 "up",
                 "--developer",
@@ -554,13 +696,62 @@ class IntegrationRunner:
                 str(self.fixture_source_dir),
                 "--openclaw-payload",
                 str(self.fixture_payload_dir),
+                "--add-signal-cli-provisioning",
+                "--signal-cli-payload",
+                str(self.fixture_signal_payload_dir),
             ),
+            check=False,
             capture_output=True,
-        ).stdout
+        )
+        up_output = f"{up_result.stdout}\n{up_result.stderr}"
         if up_output:
             print(up_output, end="")
-        if "shared folder mounts verified." not in up_output:
-            self.fail("Assertion failed: expected developer mount preflight verification output")
+        if up_result.returncode != 0:
+            self.fail(
+                "Assertion failed: expected developer up to succeed\n"
+                f"----- output -----\n{up_output}"
+            )
+        relaunch_marker = "Provisioning completed; relaunching"
+        if relaunch_marker not in up_output:
+            self.fail(
+                "Assertion failed: expected relaunch message in developer up output\n"
+                f"----- output -----\n{up_output}"
+            )
+        pre_relaunch_output, post_relaunch_output = up_output.split(relaunch_marker, 1)
+        if pre_relaunch_output.count("Preparing Mutagen sync...") != 1:
+            self.fail(
+                "Assertion failed: expected exactly one Mutagen sync preparation block "
+                "before provisioning completion/relaunch in developer up flow\n"
+                f"----- output -----\n{up_output}"
+            )
+        if post_relaunch_output.count("Preparing Mutagen sync...") != 1:
+            self.fail(
+                "Assertion failed: expected exactly one Mutagen sync preparation block "
+                "after GUI relaunch in developer up flow\n"
+                f"----- output -----\n{up_output}"
+            )
+        if "signal-payload:" not in pre_relaunch_output:
+            self.fail(
+                "Assertion failed: expected signal payload sync path in pre-provision Mutagen block\n"
+                f"----- output -----\n{up_output}"
+            )
+        if "signal-payload:" not in post_relaunch_output:
+            self.fail(
+                "Assertion failed: expected signal payload sync path in post-relaunch Mutagen block\n"
+                f"----- output -----\n{up_output}"
+            )
+        if "Ensure synced developer paths are owned by VM user" not in up_output:
+            self.fail(
+                "Assertion failed: expected developer ownership reconciliation task output\n"
+                f"----- output -----\n{up_output}"
+            )
+        if "File name too long" in up_output:
+            self.fail(
+                "Assertion failed: symlink-heavy source should not trigger filename-too-long ownership failure\n"
+                f"----- output -----\n{up_output}"
+            )
+        if "synced developer paths verified." not in up_output:
+            self.fail("Assertion failed: expected developer sync preflight verification output")
 
         status_output = self.run_cmd(
             self.clawbox_cmd("status", str(self.config.developer_vm_number)),
@@ -568,20 +759,27 @@ class IntegrationRunner:
         ).stdout
         if status_output:
             print(status_output, end="")
-        if "shared mounts:" not in status_output:
-            self.fail("Assertion failed: expected shared mounts section in developer status output")
+        if "sync paths:" not in status_output:
+            self.fail("Assertion failed: expected sync paths section in developer status output")
+        if "signal-cli-payload" not in status_output:
+            self.fail("Assertion failed: expected signal payload sync path in developer status output")
 
         status_json_output = self.run_cmd(
             self.clawbox_cmd("status", str(self.config.developer_vm_number), "--json"),
             capture_output=True,
         ).stdout
         status_data = json.loads(status_json_output)
-        if "shared_mounts" not in status_data:
-            self.fail("Assertion failed: expected shared_mounts object in developer status --json")
+        if "sync_paths" not in status_data:
+            self.fail("Assertion failed: expected sync_paths object in developer status --json")
+        if status_data.get("signal_payload_sync", {}).get("enabled") is not True:
+            self.fail("Assertion failed: expected signal_payload_sync.enabled=true in status --json")
 
         print(f"  verifying post-provisioning checks on {self.developer_vm_name}...")
         self.assert_vm_running(self.developer_vm_name)
         self.assert_file_contains(self.marker_path(self.developer_vm_name), "profile: developer")
+        self.assert_file_contains(self.marker_path(self.developer_vm_name), "sync_backend: mutagen")
+        self.assert_file_contains(self.marker_path(self.developer_vm_name), "signal_cli: true")
+        self.assert_file_contains(self.marker_path(self.developer_vm_name), "signal_payload: true")
         self.assert_remote_test(
             self.developer_vm_name,
             f"test -L '/Users/{self.developer_vm_name}/Developer/openclaw'",
@@ -601,6 +799,39 @@ class IntegrationRunner:
         self.assert_remote_test(
             self.developer_vm_name,
             f"test -f '/Users/{self.developer_vm_name}/Developer/openclaw/.clawbox-tsdown-gate-ok'",
+        )
+        self.assert_remote_command(self.developer_vm_name, "signal-cli", "--version")
+        self.assert_remote_test(
+            self.developer_vm_name,
+            f"test -L '/Users/{self.developer_vm_name}/.local/share/signal-cli'",
+        )
+        self.assert_remote_test(
+            self.developer_vm_name,
+            (
+                f"test \"$(realpath /Users/{self.developer_vm_name}/.local/share/signal-cli)\" = "
+                f"\"{SIGNAL_PAYLOAD_MOUNT}\""
+            ),
+        )
+        self.assert_remote_test(
+            self.developer_vm_name,
+            (
+                f"test -f '/Users/{self.developer_vm_name}/.local/share/signal-cli/"
+                "host-fixture-note.txt'"
+            ),
+        )
+        self.assert_remote_command(
+            self.developer_vm_name,
+            "/bin/sh",
+            "-lc",
+            (
+                "printf '%s\\n' 'guest-daemon-roundtrip-ok' > "
+                f"'/Users/{self.developer_vm_name}/.local/share/signal-cli/guest-daemon-note.txt'"
+            ),
+        )
+        self.assert_host_file_eventually_contains(
+            self.fixture_signal_payload_dir / "guest-daemon-note.txt",
+            "guest-daemon-roundtrip-ok",
+            timeout_seconds=120,
         )
         self.assert_remote_command(
             self.developer_vm_name,
@@ -686,6 +917,107 @@ class IntegrationRunner:
         finally:
             self.secrets_file.write_text(original, encoding="utf-8")
 
+    def run_developer_marker_migration_guard_flow(self) -> None:
+        print(f"==> integration: developer marker migration guard ({self.developer_vm_name})")
+        marker = self.marker_path(self.developer_vm_name)
+        if not marker.exists():
+            self.fail(f"Assertion failed: expected marker to exist before migration guard test: {marker}")
+
+        original = marker.read_text(encoding="utf-8")
+        legacy_lines = [
+            line for line in original.splitlines() if not line.strip().startswith("sync_backend:")
+        ]
+        marker.write_text("\n".join(legacy_lines) + "\n", encoding="utf-8")
+        try:
+            up_failed = self.run_cmd(
+                self.clawbox_cmd(
+                    "up",
+                    "--developer",
+                    "--number",
+                    str(self.config.developer_vm_number),
+                    "--openclaw-source",
+                    str(self.fixture_source_dir),
+                    "--openclaw-payload",
+                    str(self.fixture_payload_dir),
+                    "--add-signal-cli-provisioning",
+                    "--signal-cli-payload",
+                    str(self.fixture_signal_payload_dir),
+                ),
+                check=False,
+                capture_output=True,
+            )
+            output = f"{up_failed.stdout}\n{up_failed.stderr}"
+            if up_failed.returncode == 0:
+                self.fail(
+                    "Assertion failed: expected developer up to fail for legacy marker migration guard\n"
+                    f"----- output -----\n{output}"
+                )
+            if "legacy provision marker format" not in output:
+                self.fail(
+                    "Assertion failed: expected migration guard message for legacy marker format\n"
+                    f"----- output -----\n{output}"
+                )
+            if "Recreate the VM instead" not in output:
+                self.fail(
+                    "Assertion failed: expected recreate guidance in migration guard output\n"
+                    f"----- output -----\n{output}"
+                )
+        finally:
+            marker.write_text(original, encoding="utf-8")
+
+    def run_developer_out_of_band_shutdown_flow(self) -> None:
+        print(f"==> integration: out-of-band shutdown watcher cleanup ({self.developer_vm_name})")
+        vm_name = self.developer_vm_name
+        watcher_record = self.watcher_record_path(vm_name)
+
+        self.assert_vm_running(vm_name)
+        if not watcher_record.exists():
+            self.fail(
+                "Assertion failed: expected watcher record file before out-of-band shutdown\n"
+                f"  file: {watcher_record}"
+            )
+        if not locked_path_for_vm(OPENCLAW_SOURCE_LOCK, vm_name):
+            self.fail("Assertion failed: expected source lock to exist before out-of-band shutdown")
+        if not locked_path_for_vm(OPENCLAW_PAYLOAD_LOCK, vm_name):
+            self.fail("Assertion failed: expected payload lock to exist before out-of-band shutdown")
+        if not locked_path_for_vm(SIGNAL_PAYLOAD_LOCK, vm_name):
+            self.fail("Assertion failed: expected signal payload lock to exist before out-of-band shutdown")
+
+        self.run_cmd(["tart", "stop", vm_name], check=False, capture_output=True)
+        self.assert_eventually(
+            lambda: not self.tart.vm_running(vm_name),
+            timeout_seconds=120,
+            poll_seconds=2,
+            failure_message=f"Assertion failed: expected VM to stop via out-of-band tart stop ({vm_name})",
+        )
+        self.assert_eventually(
+            lambda: not watcher_record.exists(),
+            timeout_seconds=45,
+            poll_seconds=2,
+            failure_message=(
+                "Assertion failed: watcher record not cleaned after out-of-band VM shutdown\n"
+                f"  file: {watcher_record}"
+            ),
+        )
+        self.assert_eventually(
+            lambda: locked_path_for_vm(OPENCLAW_SOURCE_LOCK, vm_name) == "",
+            timeout_seconds=45,
+            poll_seconds=2,
+            failure_message="Assertion failed: source lock not released after out-of-band VM shutdown",
+        )
+        self.assert_eventually(
+            lambda: locked_path_for_vm(OPENCLAW_PAYLOAD_LOCK, vm_name) == "",
+            timeout_seconds=45,
+            poll_seconds=2,
+            failure_message="Assertion failed: payload lock not released after out-of-band VM shutdown",
+        )
+        self.assert_eventually(
+            lambda: locked_path_for_vm(SIGNAL_PAYLOAD_LOCK, vm_name) == "",
+            timeout_seconds=45,
+            poll_seconds=2,
+            failure_message="Assertion failed: signal payload lock not released after out-of-band VM shutdown",
+        )
+
     def run(self) -> None:
         self.ensure_prerequisites()
         self.ensure_safe_cleanup_targets()
@@ -708,8 +1040,11 @@ class IntegrationRunner:
         if self.config.profile == "full":
             self.create_openclaw_fixture()
             self.run_developer_invalid_source_gate_flow()
+            self.run_developer_signal_payload_marker_guard_flow()
             self.run_developer_flow()
             self.run_status_warning_flow()
+            self.run_developer_marker_migration_guard_flow()
+            self.run_developer_out_of_band_shutdown_flow()
         else:
             print(
                 "==> integration: developer/status flows skipped "

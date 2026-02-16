@@ -17,3 +17,16 @@
     path: "/Users/{{ vm_name }}/.zprofile"
     line: 'eval "$(/opt/homebrew/bin/brew shellenv)"'
     create: yes
+
+- name: Ensure Mutagen Homebrew tap is available
+  become_user: "{{ vm_name }}"
+  command: /opt/homebrew/bin/brew tap mutagen-io/mutagen
+  changed_when: false
+
+- name: Install Mutagen via Homebrew
+  become_user: "{{ vm_name }}"
+  community.general.homebrew:
+    name: mutagen
+    state: present
+  environment:
+    PATH: "{{ clawbox_brew_env_path }}"
