@@ -22,10 +22,13 @@ def test_readme_and_developer_guide_define_orchestration_only_contract() -> None
     assert "clawbox recreate 1" in guide
 
 
-def test_readme_uses_gateway_watch_without_redundant_force_flag() -> None:
+def test_readme_uses_clawbox_safe_watch_recipe() -> None:
     readme = (PROJECT_DIR / "README.md").read_text(encoding="utf-8")
     guide = (PROJECT_DIR / "DEVELOPER.md").read_text(encoding="utf-8")
-    assert "pnpm gateway:watch\n" in readme
+    assert "scripts/run-node.mjs gateway --force" in readme
+    assert "--watch-path src --watch-path tsconfig.json --watch-path package.json" in readme
+    assert "PATH=/opt/homebrew/bin:$PATH" not in readme
+    assert "pnpm gateway:watch\n" not in readme
     assert "pnpm gateway:watch --force" not in readme
     assert "pnpm gateway:watch\n" in guide
     assert "pnpm gateway:watch --force" not in guide
@@ -40,6 +43,18 @@ def test_openclaw_role_links_developer_source_without_runtime_wrappers() -> None
     assert "Link synced OpenClaw source as global openclaw command" in role
     assert "command: npm link" in role
     assert "openclaw-dev" not in role
+
+
+def test_homebrew_role_sets_path_for_login_and_non_login_zsh_shells() -> None:
+    role = (PROJECT_DIR / "ansible" / "roles" / "homebrew" / "tasks" / "main.yml").read_text(
+        encoding="utf-8"
+    )
+    assert 'path: "/Users/{{ vm_name }}/.zprofile"' in role
+    assert 'line: \'eval "$(/opt/homebrew/bin/brew shellenv)"\'' in role
+    assert "Ensure Homebrew is on PATH for non-login zsh shells" in role
+    assert "path: /etc/zshenv" in role
+    assert "CLAWBOX HOMEBREW PATH" in role
+    assert "/opt/homebrew/bin:/opt/homebrew/sbin:$PATH" in role
 
 
 def test_development_plan_references_python_cli_not_legacy_shell_wrappers() -> None:
