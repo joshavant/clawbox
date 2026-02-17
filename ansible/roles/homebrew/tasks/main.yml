@@ -18,6 +18,19 @@
     line: 'eval "$(/opt/homebrew/bin/brew shellenv)"'
     create: yes
 
+- name: Ensure Homebrew is on PATH for non-login zsh shells
+  become: true
+  blockinfile:
+    path: /etc/zshenv
+    create: true
+    marker: "# {mark} CLAWBOX HOMEBREW PATH"
+    block: |
+      # Ensure Homebrew tools are available in non-login zsh shells.
+      case ":$PATH:" in
+        *:/opt/homebrew/bin:*) ;;
+        *) export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH" ;;
+      esac
+
 - name: Ensure Mutagen Homebrew tap is available
   become_user: "{{ vm_name }}"
   command: /opt/homebrew/bin/brew tap mutagen-io/mutagen
