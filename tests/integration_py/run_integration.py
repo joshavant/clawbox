@@ -409,11 +409,15 @@ class IntegrationRunner:
                 """\
                 #!/usr/bin/env node
 
+                const fs = require('node:fs')
+                const path = require('node:path')
                 const args = process.argv.slice(2)
                 if (args.includes('--help')) {
                   console.log('openclaw gateway:watch fixture help')
                   process.exit(0)
                 }
+                const marker = path.join(process.cwd(), '.clawbox-gateway-watch-invoked')
+                fs.writeFileSync(marker, `${args.join(' ')}\\n`, 'utf8')
                 console.log('openclaw gateway:watch fixture invoked:', args.join(' '))
                 process.exit(0)
                 """
@@ -839,7 +843,13 @@ class IntegrationRunner:
             "--dir",
             f"/Users/{self.developer_vm_name}/Developer/openclaw",
             "gateway:watch",
-            "--help",
+        )
+        self.assert_remote_test(
+            self.developer_vm_name,
+            (
+                "test -f "
+                f"'/Users/{self.developer_vm_name}/Developer/openclaw/.clawbox-gateway-watch-invoked'"
+            ),
         )
 
     def run_optional_feature_flow(self) -> None:

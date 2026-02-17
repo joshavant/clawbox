@@ -617,7 +617,7 @@ def test_deactivate_mutagen_sync_maps_mutagen_error(monkeypatch: pytest.MonkeyPa
         orchestrator._deactivate_mutagen_sync("clawbox-1", flush=False)
 
 
-def test_build_sync_specs_ignores_node_modules_for_source() -> None:
+def test_build_sync_specs_ignores_node_modules_and_dist_for_source() -> None:
     specs = orchestrator._build_sync_specs(
         "clawbox-1",
         {
@@ -628,7 +628,7 @@ def test_build_sync_specs_ignores_node_modules_for_source() -> None:
     )
     source_specs = [spec for spec in specs if spec.kind == "openclaw-source"]
     assert len(source_specs) == 1
-    assert source_specs[0].ignored_paths == ("node_modules",)
+    assert source_specs[0].ignored_paths == ("node_modules", "dist")
     assert source_specs[0].ready_required is True
     signal_specs = [spec for spec in specs if spec.kind == "signal-payload"]
     assert len(signal_specs) == 0

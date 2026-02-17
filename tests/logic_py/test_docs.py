@@ -22,6 +22,15 @@ def test_readme_and_developer_guide_define_orchestration_only_contract() -> None
     assert "clawbox recreate 1" in guide
 
 
+def test_readme_uses_gateway_watch_without_redundant_force_flag() -> None:
+    readme = (PROJECT_DIR / "README.md").read_text(encoding="utf-8")
+    guide = (PROJECT_DIR / "DEVELOPER.md").read_text(encoding="utf-8")
+    assert "pnpm gateway:watch\n" in readme
+    assert "pnpm gateway:watch --force" not in readme
+    assert "pnpm gateway:watch\n" in guide
+    assert "pnpm gateway:watch --force" not in guide
+
+
 def test_openclaw_role_links_developer_source_without_runtime_wrappers() -> None:
     role = (PROJECT_DIR / "ansible" / "roles" / "openclaw" / "tasks" / "main.yml").read_text(
         encoding="utf-8"

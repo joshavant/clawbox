@@ -225,7 +225,7 @@ SYNC_PATH_BINDINGS = (
         guest_path_template=OPENCLAW_SOURCE_MOUNT,
         default_guest_path_template=DEFAULT_OPENCLAW_SOURCE_MOUNT,
         ignore_vcs=True,
-        ignored_paths=("node_modules",),
+        ignored_paths=("node_modules", "dist"),
         required=True,
     ),
     SyncPathBinding(

@@ -104,12 +104,15 @@ clawbox up --developer --number 2 \
 
 > **Note:** Apple's macOS Software License Agreement permits up to two virtualized macOS instances per Apple host. Clawbox can target other VM numbers, but host virtualization limits may block additional concurrent VMs.
 
-For source-driven dev loops, combine with OpenClaw's documented file watcher flow:
+For source-driven dev loops in a Clawbox VM, run this inside the VM:
 
 ```bash
 cd ~/Developer/openclaw
-pnpm gateway:watch --force
+pnpm gateway:watch
 ```
+
+Then edit files on the host in the synced source checkout (for example, `~/Developer/openclaw-1`).
+Clawbox excludes `dist` from source sync so build artifacts stay VM-local while source changes still hot-reload.
 
 ## Optional Dependency Provisioning
 

@@ -58,6 +58,13 @@ Developer sync readiness:
 2. Treat `Clawbox is ready: <vm-name>` as the interaction-safe point for login and synced path edits.
 3. On slower hosts, increase wait time with `CLAWBOX_MUTAGEN_READY_TIMEOUT_SECONDS` (default: `60`).
 
+Source-driven gateway loop (run inside VM):
+
+```bash
+cd ~/Developer/openclaw
+pnpm gateway:watch
+```
+
 ## Command Flows
 
 Recommended entrypoint:
