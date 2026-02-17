@@ -42,6 +42,9 @@ include = ["clawbox*"]
 "share/clawbox/ansible/roles/node/tasks" = [
   "ansible/roles/node/tasks/main.yml",
 ]
+"share/clawbox/ansible/roles/network_preflight/tasks" = [
+  "ansible/roles/network_preflight/tasks/main.yml",
+]
 "share/clawbox/ansible/roles/openclaw/tasks" = [
   "ansible/roles/openclaw/tasks/main.yml",
 ]

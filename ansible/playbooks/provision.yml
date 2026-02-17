@@ -25,6 +25,8 @@
     ansible_become_password: "{{ vm_password }}"
     vm_name: "{{ vm_base_name }}-{{ vm_number }}"
   roles:
+    - role: network_preflight
+      tags: [network_preflight, homebrew]
     - role: homebrew
       tags: [homebrew]
     - role: tart_guest_agent

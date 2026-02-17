@@ -1,0 +1,63 @@
+---
+- name: Fail network preflight when integration fault injection is enabled
+  fail:
+    msg: |
+      VM networking preflight failed before Homebrew install.
+      Forced integration test failure via CLAWBOX_TEST_FORCE_NETWORK_PREFLIGHT_FAIL.
+  when: >-
+    (lookup('env', 'CLAWBOX_TEST_FORCE_NETWORK_PREFLIGHT_FAIL') | default('') | lower)
+    in ['1', 'true', 'yes']
+
+- name: Check outbound internet reachability by IP
+  become_user: "{{ vm_name }}"
+  command: /usr/bin/curl -fsS --connect-timeout 5 --max-time 15 --insecure -o /dev/null https://1.1.1.1
+  register: network_preflight_ip_connectivity
+  changed_when: false
+  failed_when: false
+
+- name: Check DNS resolution for Homebrew installer host
+  become_user: "{{ vm_name }}"
+  command: /usr/bin/dscacheutil -q host -a name raw.githubusercontent.com
+  register: network_preflight_dns_resolution_initial
+  changed_when: false
+  failed_when: false
+
+- name: Re-check DNS resolution for Homebrew installer host
+  become_user: "{{ vm_name }}"
+  command: /usr/bin/dscacheutil -q host -a name raw.githubusercontent.com
+  register: network_preflight_dns_resolution_final
+  changed_when: false
+  failed_when: false
+  when: network_preflight_dns_resolution_initial.rc == 0
+
+- name: Keep DNS probe result when initial check fails
+  set_fact:
+    network_preflight_dns_resolution_final: "{{ network_preflight_dns_resolution_initial }}"
+  when: network_preflight_dns_resolution_initial.rc != 0
+
+- name: Check HTTPS reachability for Homebrew installer endpoint
+  become_user: "{{ vm_name }}"
+  command: >
+    /usr/bin/curl -fsSLI --connect-timeout 5 --max-time 20
+    https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
+  register: network_preflight_brew_endpoint
+  changed_when: false
+  failed_when: false
+
+- name: Fail fast when VM internet or DNS prerequisites are missing
+  fail:
+    msg: |
+      VM networking preflight failed before Homebrew install.
+        IP reachability check rc: {{ network_preflight_ip_connectivity.rc }}
+        DNS resolution check rc: {{ network_preflight_dns_resolution_final.rc }}
+        Homebrew endpoint check rc: {{ network_preflight_brew_endpoint.rc }}
+      This VM must have outbound internet access and working DNS for provisioning.
+      If macOS Application Firewall is enabled on the host, allow Tart's binary in the firewall allowlist.
+      Last DNS probe output:
+        {{ (network_preflight_dns_resolution_final.stderr | default(network_preflight_dns_resolution_final.stdout) | default('n/a')).strip() }}
+      Last endpoint probe output:
+        {{ (network_preflight_brew_endpoint.stderr | default(network_preflight_brew_endpoint.stdout) | default('n/a')).strip() }}
+  when: >-
+    network_preflight_ip_connectivity.rc != 0 or
+    network_preflight_dns_resolution_final.rc != 0 or
+    network_preflight_brew_endpoint.rc != 0

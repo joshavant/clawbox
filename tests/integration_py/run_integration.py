@@ -590,6 +590,46 @@ class IntegrationRunner:
             self.cleanup_vm(vm_name)
             marker.unlink(missing_ok=True)
 
+    def run_standard_network_preflight_failure_flow(self) -> None:
+        print(f"==> integration: standard network preflight failure ({self.standard_vm_name})")
+        vm_name = self.standard_vm_name
+        marker = self.marker_path(vm_name)
+        self.cleanup_vm(vm_name)
+        marker.unlink(missing_ok=True)
+
+        self.run_cmd(self.clawbox_cmd("create", str(self.config.standard_vm_number)))
+        self.run_cmd(
+            self.clawbox_cmd(
+                "launch",
+                str(self.config.standard_vm_number),
+                "--headless",
+            ),
+        )
+
+        env = os.environ.copy()
+        env["CLAWBOX_TEST_FORCE_NETWORK_PREFLIGHT_FAIL"] = "1"
+        provision_failed = self.run_cmd(
+            self.clawbox_cmd("provision", str(self.config.standard_vm_number)),
+            check=False,
+            capture_output=True,
+            env=env,
+        )
+        output = f"{provision_failed.stdout}\n{provision_failed.stderr}"
+        if provision_failed.returncode == 0:
+            self.fail(
+                "Assertion failed: expected standard provision to fail when network preflight fault injection is enabled\n"
+                f"----- output -----\n{output}"
+            )
+        if "VM networking preflight failed before Homebrew install." not in output:
+            self.fail(
+                "Assertion failed: expected forced network preflight failure message in output\n"
+                f"----- output -----\n{output}"
+            )
+        if marker.exists():
+            self.fail(
+                "Assertion failed: expected no provision marker after network preflight failure"
+            )
+
     def run_standard_flow(self) -> None:
         print(f"==> integration: standard flow ({self.standard_vm_name})")
         self.cleanup_vm(self.standard_vm_name)
@@ -1044,6 +1084,13 @@ class IntegrationRunner:
         self.ensure_base_image()
         print(f"==> integration: profile={self.config.profile} exhaustive={self.config.exhaustive}")
 
+        if self.config.profile == "full":
+            self.run_standard_network_preflight_failure_flow()
+        else:
+            print(
+                "==> integration: network preflight failure flow skipped "
+                "(set CLAWBOX_CI_PROFILE=full to enable)"
+            )
         self.run_standard_flow()
         self.run_vm_management_flow()
 

@@ -57,6 +57,31 @@ def test_homebrew_role_sets_path_for_login_and_non_login_zsh_shells() -> None:
     assert "/opt/homebrew/bin:/opt/homebrew/sbin:$PATH" in role
 
 
+def test_homebrew_role_fails_fast_when_brew_binary_is_missing_after_install() -> None:
+    role = (PROJECT_DIR / "ansible" / "roles" / "homebrew" / "tasks" / "main.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "Run Homebrew installer" in role
+    assert "Verify Homebrew binary is present" in role
+    assert "Fail when Homebrew install did not produce brew binary" in role
+    assert "Expected binary is missing: /opt/homebrew/bin/brew" in role
+
+
+def test_provision_playbook_runs_network_preflight_before_homebrew() -> None:
+    playbook = (PROJECT_DIR / "ansible" / "playbooks" / "provision.yml").read_text(encoding="utf-8")
+    network_idx = playbook.index("- role: network_preflight")
+    homebrew_idx = playbook.index("- role: homebrew")
+    assert network_idx < homebrew_idx
+
+
+def test_network_preflight_has_no_guest_dns_mutation_step() -> None:
+    role = (
+        PROJECT_DIR / "ansible" / "roles" / "network_preflight" / "tasks" / "main.yml"
+    ).read_text(encoding="utf-8")
+    assert "CLAWBOX_TEST_FORCE_NETWORK_PREFLIGHT_FAIL" in role
+    assert "networksetup -setdnsservers" not in role
+
+
 def test_development_plan_references_python_cli_not_legacy_shell_wrappers() -> None:
     plan_file = PROJECT_DIR / "DEVELOPMENT_PLAN.md"
     if not plan_file.exists():

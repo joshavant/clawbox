@@ -303,3 +303,41 @@ def test_load_config_rejects_invalid_profile(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLAWBOX_CI_PROFILE", "invalid")
     with pytest.raises(module.IntegrationError, match="CLAWBOX_CI_PROFILE must be one of"):
         module.load_config()
+
+
+def test_standard_network_preflight_failure_flow_sets_fault_injection_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    module = _load_integration_module()
+    monkeypatch.setattr(module, "vm_base_name", lambda: "clawbox")
+    runner = module.IntegrationRunner(
+        tmp_path,
+        _integration_config(module, standard_vm_number=91, developer_vm_number=92, optional_vm_number=93),
+    )
+
+    cleanup_calls: list[str] = []
+    provision_envs: list[dict[str, str] | None] = []
+
+    def fake_cleanup_vm(vm_name: str) -> None:
+        cleanup_calls.append(vm_name)
+
+    def fake_run_cmd(args, **kwargs):
+        if args[:4] == ["python3", "-m", "clawbox", "provision"]:
+            provision_envs.append(kwargs.get("env"))
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=1,
+                stdout="VM networking preflight failed before Homebrew install.\n",
+                stderr="",
+            )
+        return _fake_completed_process(args)
+
+    monkeypatch.setattr(runner, "cleanup_vm", fake_cleanup_vm)
+    monkeypatch.setattr(runner, "run_cmd", fake_run_cmd)
+
+    runner.run_standard_network_preflight_failure_flow()
+
+    assert cleanup_calls == [runner.standard_vm_name]
+    assert provision_envs
+    assert provision_envs[0] is not None
+    assert provision_envs[0]["CLAWBOX_TEST_FORCE_NETWORK_PREFLIGHT_FAIL"] == "1"

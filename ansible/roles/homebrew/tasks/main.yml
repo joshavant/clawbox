@@ -6,10 +6,32 @@
 
 - name: Install Homebrew
   become_user: "{{ vm_name }}"
-  shell: |
-    NONINTERACTIVE=1 /bin/bash -c \
-      "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  get_url:
+    url: https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
+    dest: /tmp/clawbox-homebrew-install.sh
+    mode: "0755"
   when: not brew_check.stat.exists
+
+- name: Run Homebrew installer
+  become_user: "{{ vm_name }}"
+  command: /bin/bash /tmp/clawbox-homebrew-install.sh
+  environment:
+    NONINTERACTIVE: "1"
+  when: not brew_check.stat.exists
+
+- name: Verify Homebrew binary is present
+  stat:
+    path: /opt/homebrew/bin/brew
+  register: brew_check_after
+  changed_when: false
+
+- name: Fail when Homebrew install did not produce brew binary
+  fail:
+    msg: |
+      Homebrew installation did not complete successfully.
+      Expected binary is missing: /opt/homebrew/bin/brew
+      Check guest internet and DNS connectivity, then rerun provisioning.
+  when: not brew_check_after.stat.exists
 
 - name: Ensure brew is on PATH in shell profile
   become_user: "{{ vm_name }}"
