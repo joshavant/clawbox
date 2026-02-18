@@ -416,3 +416,62 @@ def test_run_vm_watcher_loop_handles_tart_errors_and_mutagen_errors(
     watcher_mod.run_vm_watcher_loop(tart=_Tart(), state_dir=tmp_path, vm_name=vm_name, poll_seconds=1)
     assert cleaned == [vm_name]
     assert not record_file.exists()
+
+
+def test_run_vm_watcher_loop_requires_consecutive_not_running_polls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vm_name = "clawbox-8"
+    record_file = _record_path(tmp_path, vm_name)
+    record_file.parent.mkdir(parents=True, exist_ok=True)
+    record_file.write_text(
+        json.dumps(
+            {
+                "vm_name": vm_name,
+                "pid": watcher_mod.os.getpid(),
+                "poll_seconds": 1,
+                "started_at": "2026-01-01T00:00:00Z",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class _Tart:
+        def __init__(self):
+            self.calls = 0
+            self.sequence = [True, False, True, False, False, False]
+
+        def vm_running(self, _vm_name: str) -> bool:
+            self.calls += 1
+            if self.calls <= len(self.sequence):
+                return self.sequence[self.calls - 1]
+            return False
+
+    tart = _Tart()
+    monkeypatch.setattr(watcher_mod.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(watcher_mod.signal, "signal", lambda *_args, **_kwargs: None)
+    torn_down: list[str] = []
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        watcher_mod,
+        "teardown_vm_sync",
+        lambda _state_dir, name, flush: torn_down.append(f"{name}:{flush}"),
+    )
+    monkeypatch.setattr(
+        watcher_mod,
+        "emit_sync_event",
+        lambda _state_dir, _vm_name, *, event, actor, reason, details=None: events.append((event, reason)),
+    )
+    cleaned: list[str] = []
+    monkeypatch.setattr(watcher_mod, "cleanup_locks_for_vm", lambda name: cleaned.append(name))
+
+    watcher_mod.run_vm_watcher_loop(tart=tart, state_dir=tmp_path, vm_name=vm_name, poll_seconds=1)
+    assert tart.calls >= 6
+    assert torn_down == [f"{vm_name}:False"]
+    assert cleaned == [vm_name]
+    assert events == [
+        ("watcher_teardown_triggered", "vm_not_running_confirmed"),
+        ("watcher_teardown_complete", "vm_not_running_confirmed"),
+    ]
+    assert not record_file.exists()

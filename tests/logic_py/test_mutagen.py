@@ -98,14 +98,26 @@ def test_reconcile_vm_sync_tears_down_inactive_vm(
             return False
 
     torn_down: list[str] = []
+    events: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
         mutagen_mod,
         "teardown_vm_sync",
         lambda _state_dir, vm_name, flush: torn_down.append(vm_name),
     )
+    monkeypatch.setattr(
+        mutagen_mod,
+        "emit_sync_event",
+        lambda _state_dir, vm_name, *, event, actor, reason, details=None: events.append(
+            (vm_name, event, reason)
+        ),
+    )
 
     mutagen_mod.reconcile_vm_sync(_Tart(), tmp_path)
     assert torn_down == ["clawbox-2"]
+    assert events == [
+        ("clawbox-2", "reconcile_teardown_triggered", "vm_not_running"),
+        ("clawbox-2", "reconcile_teardown_ok", "vm_not_running"),
+    ]
 
 
 def test_terminate_vm_sessions_is_noop_without_mutagen(monkeypatch: pytest.MonkeyPatch) -> None:

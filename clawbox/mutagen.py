@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from clawbox.io_utils import atomic_write_text, read_text_or_empty
+from clawbox.sync_events import emit_sync_event
 from clawbox.tart import TartClient, TartError
 
 
@@ -307,4 +308,31 @@ def reconcile_vm_sync(tart: TartClient, state_dir: Path) -> None:
         except TartError:
             continue
         if not running:
-            teardown_vm_sync(state_dir, vm_name, flush=False)
+            emit_sync_event(
+                state_dir,
+                vm_name,
+                event="reconcile_teardown_triggered",
+                actor="reconcile",
+                reason="vm_not_running",
+                details={"flush": False},
+            )
+            try:
+                teardown_vm_sync(state_dir, vm_name, flush=False)
+            except MutagenError as exc:
+                emit_sync_event(
+                    state_dir,
+                    vm_name,
+                    event="reconcile_teardown_error",
+                    actor="reconcile",
+                    reason="vm_not_running",
+                    details={"flush": False, "error_type": type(exc).__name__, "error": str(exc)},
+                )
+                raise
+            emit_sync_event(
+                state_dir,
+                vm_name,
+                event="reconcile_teardown_ok",
+                actor="reconcile",
+                reason="vm_not_running",
+                details={"flush": False},
+            )

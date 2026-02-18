@@ -172,6 +172,74 @@ class IntegrationRunner:
     def watcher_record_path(self, vm_name: str) -> Path:
         return self.project_dir / ".clawbox" / "state" / "watchers" / f"{vm_name}.json"
 
+    def sync_event_log_path(self) -> Path:
+        return self.project_dir / ".clawbox" / "state" / "logs" / "sync-events.jsonl"
+
+    def read_sync_events(self) -> list[dict[str, object]]:
+        path = self.sync_event_log_path()
+        if not path.exists():
+            return []
+        events: list[dict[str, object]] = []
+        for idx, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError as exc:
+                self.fail(
+                    "Assertion failed: invalid JSON in sync event log\n"
+                    f"  file: {path}\n"
+                    f"  line: {idx}\n"
+                    f"  error: {exc}"
+                )
+            if not isinstance(parsed, dict):
+                self.fail(
+                    "Assertion failed: sync event log entry is not a JSON object\n"
+                    f"  file: {path}\n"
+                    f"  line: {idx}\n"
+                    f"  value: {parsed!r}"
+                )
+            events.append(parsed)
+        return events
+
+    def assert_sync_event_sequence_eventually(
+        self,
+        vm_name: str,
+        *,
+        start_index: int,
+        expected: list[tuple[str, str, str]],
+        timeout_seconds: int = 45,
+        poll_seconds: int = 2,
+    ) -> None:
+        if not expected:
+            return
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            new_events = self.read_sync_events()[start_index:]
+            vm_events = [e for e in new_events if e.get("vm") == vm_name]
+            expected_index = 0
+            for event in vm_events:
+                if (
+                    event.get("event") == expected[expected_index][0]
+                    and event.get("actor") == expected[expected_index][1]
+                    and event.get("reason") == expected[expected_index][2]
+                ):
+                    expected_index += 1
+                    if expected_index == len(expected):
+                        return
+            time.sleep(poll_seconds)
+
+        new_events = self.read_sync_events()[start_index:]
+        preview = "\n".join(json.dumps(event, sort_keys=True) for event in new_events[-12:])
+        self.fail(
+            "Assertion failed: expected sync event sequence not observed in time\n"
+            f"  vm: {vm_name}\n"
+            f"  expected: {expected}\n"
+            f"  log: {self.sync_event_log_path()}\n"
+            "  recent events:\n"
+            f"{preview}\n"
+        )
+
     def assert_eventually(
         self,
         condition: Callable[[], bool],
@@ -1019,6 +1087,7 @@ class IntegrationRunner:
         print(f"==> integration: out-of-band shutdown watcher cleanup ({self.developer_vm_name})")
         vm_name = self.developer_vm_name
         watcher_record = self.watcher_record_path(vm_name)
+        sync_event_start = len(self.read_sync_events())
 
         self.assert_vm_running(vm_name)
         if not watcher_record.exists():
@@ -1067,6 +1136,77 @@ class IntegrationRunner:
             poll_seconds=2,
             failure_message="Assertion failed: signal payload lock not released after out-of-band VM shutdown",
         )
+        self.assert_sync_event_sequence_eventually(
+            vm_name,
+            start_index=sync_event_start,
+            expected=[
+                ("watcher_teardown_triggered", "watcher", "vm_not_running_confirmed"),
+                ("watcher_teardown_complete", "watcher", "vm_not_running_confirmed"),
+            ],
+            timeout_seconds=45,
+            poll_seconds=2,
+        )
+
+    def run_developer_orchestrated_down_flow(self) -> None:
+        print(f"==> integration: orchestrated down teardown events ({self.developer_vm_name})")
+        vm_name = self.developer_vm_name
+        sync_event_start = len(self.read_sync_events())
+
+        self.assert_vm_running(vm_name)
+        self.run_cmd(self.clawbox_cmd("down", str(self.config.developer_vm_number)))
+        self.assert_eventually(
+            lambda: not self.tart.vm_running(vm_name),
+            timeout_seconds=120,
+            poll_seconds=2,
+            failure_message=f"Assertion failed: expected VM to stop after clawbox down ({vm_name})",
+        )
+        self.assert_sync_event_sequence_eventually(
+            vm_name,
+            start_index=sync_event_start,
+            expected=[
+                ("teardown_start", "orchestrator", "_stop_vm_and_wait"),
+                ("teardown_ok", "orchestrator", "_stop_vm_and_wait"),
+                ("teardown_start", "orchestrator", "down_vm"),
+                ("teardown_ok", "orchestrator", "down_vm"),
+            ],
+            timeout_seconds=45,
+            poll_seconds=2,
+        )
+        self.assert_eventually(
+            lambda: locked_path_for_vm(OPENCLAW_SOURCE_LOCK, vm_name) == "",
+            timeout_seconds=45,
+            poll_seconds=2,
+            failure_message="Assertion failed: source lock not released after clawbox down",
+        )
+        self.assert_eventually(
+            lambda: locked_path_for_vm(OPENCLAW_PAYLOAD_LOCK, vm_name) == "",
+            timeout_seconds=45,
+            poll_seconds=2,
+            failure_message="Assertion failed: payload lock not released after clawbox down",
+        )
+        self.assert_eventually(
+            lambda: locked_path_for_vm(SIGNAL_PAYLOAD_LOCK, vm_name) == "",
+            timeout_seconds=45,
+            poll_seconds=2,
+            failure_message="Assertion failed: signal payload lock not released after clawbox down",
+        )
+
+        # Bring the VM back up so subsequent out-of-band shutdown checks can run.
+        self.run_cmd(
+            self.clawbox_cmd(
+                "launch",
+                "--developer",
+                str(self.config.developer_vm_number),
+                "--openclaw-source",
+                str(self.fixture_source_dir),
+                "--openclaw-payload",
+                str(self.fixture_payload_dir),
+                "--signal-cli-payload",
+                str(self.fixture_signal_payload_dir),
+                "--headless",
+            )
+        )
+        self.assert_vm_running(vm_name)
 
     def run(self) -> None:
         self.ensure_prerequisites()
@@ -1101,6 +1241,7 @@ class IntegrationRunner:
             self.run_developer_flow()
             self.run_status_warning_flow()
             self.run_developer_marker_migration_guard_flow()
+            self.run_developer_orchestrated_down_flow()
             self.run_developer_out_of_band_shutdown_flow()
         else:
             print(

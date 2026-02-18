@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## v1.2.3
+
+### Changes
+
+- feat(sync): add structured sync lifecycle event logging for activation/teardown diagnostics
+- fix(sync): report Mutagen session health in `clawbox status` and warn when sessions are inactive
+- fix(watcher): require consecutive not-running polls before watcher-triggered sync teardown
+- test(integration): assert orchestrator and watcher teardown event sequences
+
+
 ## v1.2.2
 
 ### Changes

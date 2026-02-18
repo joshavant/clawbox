@@ -731,7 +731,7 @@ def test_provision_developer_activates_sync_from_locks_by_default(isolated_paths
     monkeypatch.setattr(
         orchestrator,
         "_activate_mutagen_sync_from_locks",
-        lambda _vm_name, _tart: activations.append(_vm_name),
+        lambda _vm_name, _tart, **_kwargs: activations.append(_vm_name),
     )
     monkeypatch.setattr(
         orchestrator.subprocess,

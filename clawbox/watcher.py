@@ -14,11 +14,15 @@ from pathlib import Path
 from clawbox.io_utils import atomic_write_text, read_text_or_empty, tail_lines
 from clawbox.locks import cleanup_locks_for_vm
 from clawbox.mutagen import MutagenError, teardown_vm_sync
+from clawbox.sync_events import emit_sync_event
 from clawbox.tart import TartClient, TartError
 
 
 class WatcherError(RuntimeError):
     """Raised for watcher lifecycle failures."""
+
+
+_VM_STOP_CONFIRMATION_POLLS = 3
 
 
 @dataclass(frozen=True)
@@ -281,6 +285,7 @@ def run_vm_watcher_loop(
     poll_seconds: int = 2,
 ) -> None:
     should_exit = False
+    consecutive_not_running = 0
 
     def _handle_signal(_sig: int, _frame: object) -> None:
         nonlocal should_exit
@@ -294,16 +299,53 @@ def run_vm_watcher_loop(
             try:
                 running = tart.vm_running(vm_name)
             except TartError:
+                consecutive_not_running = 0
                 time.sleep(poll_seconds)
                 continue
 
-            if not running:
-                try:
-                    teardown_vm_sync(state_dir, vm_name, flush=False)
-                except MutagenError:
-                    pass
-                cleanup_locks_for_vm(vm_name)
-                break
-            time.sleep(poll_seconds)
+            if running:
+                consecutive_not_running = 0
+                time.sleep(poll_seconds)
+                continue
+
+            consecutive_not_running += 1
+            if consecutive_not_running < _VM_STOP_CONFIRMATION_POLLS:
+                time.sleep(poll_seconds)
+                continue
+
+            emit_sync_event(
+                state_dir,
+                vm_name,
+                event="watcher_teardown_triggered",
+                actor="watcher",
+                reason="vm_not_running_confirmed",
+                details={
+                    "consecutive_not_running_polls": consecutive_not_running,
+                    "confirmation_threshold": _VM_STOP_CONFIRMATION_POLLS,
+                },
+            )
+            teardown_error = ""
+            try:
+                teardown_vm_sync(state_dir, vm_name, flush=False)
+            except MutagenError as exc:
+                teardown_error = str(exc)
+                emit_sync_event(
+                    state_dir,
+                    vm_name,
+                    event="watcher_teardown_error",
+                    actor="watcher",
+                    reason="vm_not_running_confirmed",
+                    details={"flush": False, "error_type": type(exc).__name__, "error": teardown_error},
+                )
+            cleanup_locks_for_vm(vm_name)
+            emit_sync_event(
+                state_dir,
+                vm_name,
+                event="watcher_teardown_complete",
+                actor="watcher",
+                reason="vm_not_running_confirmed",
+                details={"flush": False, "mutagen_teardown_ok": teardown_error == ""},
+            )
+            break
     finally:
         _remove_record_if_owner(state_dir, vm_name, os.getpid())

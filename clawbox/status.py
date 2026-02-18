@@ -10,6 +10,7 @@ from typing import Literal, Sequence
 
 from clawbox.auth import vm_user_credentials
 from clawbox.config import vm_base_name, vm_name_for
+from clawbox.mutagen import MutagenError, mutagen_available, vm_sessions_status
 from clawbox.remote_probe import RemoteShellContext, ansible_shell as ansible_shell_shared
 from clawbox.secrets import missing_secrets_message
 from clawbox.state import ProvisionMarker
@@ -17,6 +18,7 @@ from clawbox.tart import TartClient
 
 MountProbeState = Literal["not_applicable", "ok", "unavailable"]
 SignalProbeState = Literal["not_applicable"]
+MutagenProbeState = Literal["not_applicable", "ok", "unavailable"]
 
 _MOUNT_STATUS_RE = re.compile(r"['\"]?(?P<path>.+?)['\"]?=(?P<status>mounted|dir|missing|ok)")
 
@@ -54,6 +56,14 @@ class SignalPayloadSyncReport:
 
 
 @dataclass
+class MutagenSyncReport:
+    enabled: bool
+    probe: MutagenProbeState = "not_applicable"
+    active: bool | None = None
+    lines: list[str] = field(default_factory=list)
+
+
+@dataclass
 class VMStatusReport:
     vm: str
     exists: bool
@@ -64,6 +74,7 @@ class VMStatusReport:
     signal_payload_sync: SignalPayloadSyncReport = field(
         default_factory=lambda: SignalPayloadSyncReport(enabled=False)
     )
+    mutagen_sync: MutagenSyncReport = field(default_factory=lambda: MutagenSyncReport(enabled=False))
     warnings: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
@@ -86,6 +97,12 @@ class VMStatusReport:
                 "enabled": self.signal_payload_sync.enabled,
                 "probe": self.signal_payload_sync.probe,
                 "lines": self.signal_payload_sync.lines,
+            },
+            "mutagen_sync": {
+                "enabled": self.mutagen_sync.enabled,
+                "probe": self.mutagen_sync.probe,
+                "active": self.mutagen_sync.active,
+                "lines": self.mutagen_sync.lines,
             },
             "warnings": self.warnings,
         }
@@ -218,7 +235,34 @@ def _status_report_base(
             data=marker_data,
         ),
         signal_payload_sync=SignalPayloadSyncReport(enabled=bool(marker and marker.signal_payload)),
+        mutagen_sync=MutagenSyncReport(
+            enabled=bool(marker and marker.profile == "developer" and marker.sync_backend == "mutagen")
+        ),
     )
+
+
+def _summarize_mutagen_status(status_output: str) -> tuple[bool, list[str]]:
+    lines = [line.strip() for line in status_output.splitlines() if line.strip()]
+    filtered = [line for line in lines if set(line) != {"-"}]
+    if not filtered:
+        return False, ["no active sessions found"]
+    if any("No synchronization sessions found" in line for line in filtered):
+        return False, ["no active sessions found"]
+    session_summary = [line for line in filtered if line.startswith("Name: ") or line.startswith("Status: ")]
+    if session_summary:
+        return True, session_summary[:6]
+    return True, filtered[:6]
+
+
+def _probe_mutagen_sync(vm_name: str) -> tuple[MutagenProbeState, bool | None, list[str]]:
+    if not mutagen_available():
+        return "unavailable", None, ["mutagen CLI unavailable on host"]
+    try:
+        status_output = vm_sessions_status(vm_name)
+    except MutagenError as exc:
+        return "unavailable", None, [str(exc)]
+    active, lines = _summarize_mutagen_status(status_output)
+    return "ok", active, lines
 
 
 def _status_mount_paths(
@@ -302,6 +346,15 @@ def _render_status_report_text(
         for path, status in report.sync_paths.paths.items():
             print(f"    - {path}: {status}")
 
+    if report.mutagen_sync.enabled:
+        if report.mutagen_sync.probe == "unavailable":
+            print("  mutagen sync: unavailable")
+        elif report.mutagen_sync.probe == "ok":
+            state = "active" if report.mutagen_sync.active else "inactive"
+            print(f"  mutagen sync: {state}")
+        for line in report.mutagen_sync.lines:
+            print(f"    - {line}")
+
     return
 
 
@@ -321,6 +374,18 @@ def _build_vm_status_report(
         report.ip = tart.ip(vm_name)
 
     if exists and running and report.ip:
+        if report.mutagen_sync.enabled:
+            mutagen_probe, mutagen_active, mutagen_lines = _probe_mutagen_sync(vm_name)
+            report.mutagen_sync.probe = mutagen_probe
+            report.mutagen_sync.active = mutagen_active
+            report.mutagen_sync.lines = mutagen_lines
+            if mutagen_probe == "ok" and mutagen_active is False:
+                report.warnings.append(
+                    "Mutagen sync backend is configured, but no active Mutagen sessions were found."
+                )
+            if mutagen_probe == "unavailable":
+                report.warnings.append("Mutagen sync status is unavailable.")
+
         mount_paths, mount_note = _status_mount_paths(marker, context)
         if mount_note:
             report.sync_paths.note = mount_note

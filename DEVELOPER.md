@@ -173,3 +173,9 @@ Inspect the full local Clawbox environment:
 ```bash
 clawbox status
 ```
+
+Inspect recent sync lifecycle events (activation/teardown reasons):
+
+```bash
+tail -n 80 .clawbox/state/logs/sync-events.jsonl
+```

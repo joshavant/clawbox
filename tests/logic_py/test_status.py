@@ -151,6 +151,35 @@ def test_probe_sync_paths_unavailable_when_no_parseable_status(
     assert statuses == {}
 
 
+def test_probe_mutagen_sync_reports_inactive_when_sessions_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(status_ops, "mutagen_available", lambda: True)
+    monkeypatch.setattr(
+        status_ops,
+        "vm_sessions_status",
+        lambda _vm_name: (
+            "--------------------------------------------------------------------------------\n"
+            "No synchronization sessions found\n"
+            "--------------------------------------------------------------------------------\n"
+        ),
+    )
+    probe, active, lines = status_ops._probe_mutagen_sync("clawbox-1")
+    assert probe == "ok"
+    assert active is False
+    assert lines == ["no active sessions found"]
+
+
+def test_probe_mutagen_sync_reports_unavailable_without_mutagen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(status_ops, "mutagen_available", lambda: False)
+    probe, active, lines = status_ops._probe_mutagen_sync("clawbox-1")
+    assert probe == "unavailable"
+    assert active is None
+    assert lines == ["mutagen CLI unavailable on host"]
+
+
 def test_render_status_report_text_unavailable_branches(tmp_path: Path) -> None:
     marker_file = tmp_path / "state" / "clawbox-1.provisioned"
     marker_file.parent.mkdir(parents=True, exist_ok=True)
@@ -238,6 +267,60 @@ def test_status_vm_no_marker_does_not_call_remote_probe(tmp_path: Path, monkeypa
     out = _capture(lambda: status_ops.status_vm(1, tart, as_json=False, context=ctx))
     assert called["probe"] == 0
     assert "no marker found; skipping remote sync-path probe" in out
+
+
+def test_status_vm_warns_when_mutagen_sessions_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.state_dir.mkdir(parents=True, exist_ok=True)
+    marker = ProvisionMarker(
+        vm_name="clawbox-1",
+        profile="developer",
+        playwright=False,
+        tailscale=False,
+        signal_cli=True,
+        signal_payload=True,
+        provisioned_at="2026-01-01T00:00:00Z",
+        sync_backend="mutagen",
+    )
+    marker.write(ctx.state_dir / "clawbox-1.provisioned")
+    ctx.secrets_file.parent.mkdir(parents=True, exist_ok=True)
+    ctx.secrets_file.write_text("vm_password: admin\n", encoding="utf-8")
+
+    tart = FakeTart([{"Name": "clawbox-1", "Running": True, "IP": "192.168.64.10"}])
+    monkeypatch.setattr(
+        status_ops,
+        "_ansible_shell",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["ansible"],
+            returncode=0,
+            stdout=(
+                f"{ctx.openclaw_source_mount}=dir\n"
+                f"{ctx.openclaw_payload_mount}=dir\n"
+                f"{ctx.signal_payload_mount}=dir\n"
+            ),
+            stderr="",
+        ),
+    )
+    monkeypatch.setattr(status_ops, "mutagen_available", lambda: True)
+    monkeypatch.setattr(
+        status_ops,
+        "vm_sessions_status",
+        lambda _vm_name: (
+            "--------------------------------------------------------------------------------\n"
+            "No synchronization sessions found\n"
+            "--------------------------------------------------------------------------------\n"
+        ),
+    )
+
+    out = _capture(lambda: status_ops.status_vm(1, tart, as_json=True, context=ctx))
+    payload = json.loads(out)
+    assert payload["mutagen_sync"]["enabled"] is True
+    assert payload["mutagen_sync"]["probe"] == "ok"
+    assert payload["mutagen_sync"]["active"] is False
+    assert payload["mutagen_sync"]["lines"] == ["no active sessions found"]
+    assert any("no active Mutagen sessions were found" in warning for warning in payload["warnings"])
 
 
 def test_status_environment_json_no_vms(tmp_path: Path) -> None:

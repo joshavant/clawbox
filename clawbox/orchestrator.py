@@ -38,6 +38,7 @@ from clawbox.secrets import (
     ensure_vm_password_file,
     missing_secrets_message,
 )
+from clawbox.sync_events import emit_sync_event
 from clawbox.paths import default_secrets_file, default_state_dir, resolve_data_root
 from clawbox.remote_probe import (
     RemoteShellContext,
@@ -561,77 +562,106 @@ def _activate_mutagen_sync(
     tart: TartClient,
     auth_mode: MutagenAuthMode,
     timeout_seconds: int = 120,
+    reason: str = "unspecified",
 ) -> None:
     prep_started = time.monotonic()
-    if not mutagen_available():
-        raise UserFacingError("Error: Command not found: mutagen")
-    host_paths = _host_paths_from_args(openclaw_source, openclaw_payload, signal_payload)
-    specs = _build_sync_specs(vm_name, host_paths)
-    _validate_dirs([str(spec.host_path) for spec in specs])
-
-    if not tart.vm_running(vm_name):
-        raise UserFacingError(
-            f"Error: VM '{vm_name}' must be running before activating Mutagen sync.\n"
-            "Start the VM and retry."
-        )
-    print("Preparing Mutagen sync...")
-    print(f"  waiting for VM IP (timeout: {timeout_seconds}s)...")
-    vm_ip = _resolve_vm_ip(tart, vm_name, timeout_seconds)
-    print(f"  vm ip: {vm_ip}")
-    print("  checking guest SSH credentials for sync...")
-    mutagen_user, mutagen_password = _resolve_mutagen_auth(vm_name, vm_ip, auth_mode=auth_mode)
-    print(f"  using guest account: {mutagen_user}")
-    print("  ensuring guest authorized_keys includes Clawbox sync key...")
-    _ensure_remote_mutagen_authorized_key(
+    emit_sync_event(
+        STATE_DIR,
         vm_name,
-        vm_ip,
-        ansible_user=mutagen_user,
-        ansible_password=mutagen_password,
+        event="activate_start",
+        actor="orchestrator",
+        reason=reason,
+        details={"signal_payload_enabled": bool(signal_payload), "auth_mode": auth_mode},
     )
-    key_path = _ensure_mutagen_keypair(vm_name)
-    print("  preparing guest sync directories...")
-    _prepare_remote_mutagen_targets(
-        vm_ip,
-        specs,
-        ansible_user=mutagen_user,
-        ansible_password=mutagen_password,
-    )
-    print("  creating Mutagen sessions and waiting for initial sync...")
-    alias = ensure_mutagen_ssh_alias(vm_name, vm_ip, mutagen_user, key_path)
-
-    session_sync_started = time.monotonic()
     try:
+        if not mutagen_available():
+            raise UserFacingError("Error: Command not found: mutagen")
+        host_paths = _host_paths_from_args(openclaw_source, openclaw_payload, signal_payload)
+        specs = _build_sync_specs(vm_name, host_paths)
+        _validate_dirs([str(spec.host_path) for spec in specs])
+
+        if not tart.vm_running(vm_name):
+            raise UserFacingError(
+                f"Error: VM '{vm_name}' must be running before activating Mutagen sync.\n"
+                "Start the VM and retry."
+            )
+        print("Preparing Mutagen sync...")
+        print(f"  waiting for VM IP (timeout: {timeout_seconds}s)...")
+        vm_ip = _resolve_vm_ip(tart, vm_name, timeout_seconds)
+        print(f"  vm ip: {vm_ip}")
+        print("  checking guest SSH credentials for sync...")
+        mutagen_user, mutagen_password = _resolve_mutagen_auth(vm_name, vm_ip, auth_mode=auth_mode)
+        print(f"  using guest account: {mutagen_user}")
+        print("  ensuring guest authorized_keys includes Clawbox sync key...")
+        _ensure_remote_mutagen_authorized_key(
+            vm_name,
+            vm_ip,
+            ansible_user=mutagen_user,
+            ansible_password=mutagen_password,
+        )
+        key_path = _ensure_mutagen_keypair(vm_name)
+        print("  preparing guest sync directories...")
+        _prepare_remote_mutagen_targets(
+            vm_ip,
+            specs,
+            ansible_user=mutagen_user,
+            ansible_password=mutagen_password,
+        )
+        print("  creating Mutagen sessions and waiting for initial sync...")
+        alias = ensure_mutagen_ssh_alias(vm_name, vm_ip, mutagen_user, key_path)
+
+        session_sync_started = time.monotonic()
         ensure_vm_sessions(vm_name, alias, specs)
-    except MutagenError as exc:
-        raise UserFacingError(str(exc)) from exc
-    session_sync_elapsed = time.monotonic() - session_sync_started
-    print(f"  session create/flush elapsed: {session_sync_elapsed:.1f}s")
+        session_sync_elapsed = time.monotonic() - session_sync_started
+        print(f"  session create/flush elapsed: {session_sync_elapsed:.1f}s")
 
-    print(f"  verifying sync-ready marker visibility (timeout: {MUTAGEN_READY_TIMEOUT_SECONDS}s)...")
-    ready_started = time.monotonic()
-    optional_pending = _wait_for_mutagen_sync_ready(
-        vm_ip,
-        specs,
-        vm_name=vm_name,
-        ansible_user=mutagen_user,
-        ansible_password=mutagen_password,
-        timeout_seconds=MUTAGEN_READY_TIMEOUT_SECONDS,
-    )
-    ready_elapsed = time.monotonic() - ready_started
-    print(f"  sync-ready marker visibility elapsed: {ready_elapsed:.1f}s")
-    if optional_pending:
-        print("  optional sync paths still warming up (continuing):")
-        for path in optional_pending:
-            print(f"    - {path}")
-    mark_mutagen_vm_active(STATE_DIR, vm_name)
-    prep_elapsed = time.monotonic() - prep_started
-    print(f"  mutagen preparation elapsed: {prep_elapsed:.1f}s")
-    print("Mutagen sync active (bidirectional):")
-    for spec in specs:
-        print(f"  {spec.kind}: {spec.host_path} <-> {spec.guest_path}")
+        print(f"  verifying sync-ready marker visibility (timeout: {MUTAGEN_READY_TIMEOUT_SECONDS}s)...")
+        ready_started = time.monotonic()
+        optional_pending = _wait_for_mutagen_sync_ready(
+            vm_ip,
+            specs,
+            vm_name=vm_name,
+            ansible_user=mutagen_user,
+            ansible_password=mutagen_password,
+            timeout_seconds=MUTAGEN_READY_TIMEOUT_SECONDS,
+        )
+        ready_elapsed = time.monotonic() - ready_started
+        print(f"  sync-ready marker visibility elapsed: {ready_elapsed:.1f}s")
+        if optional_pending:
+            print("  optional sync paths still warming up (continuing):")
+            for path in optional_pending:
+                print(f"    - {path}")
+        mark_mutagen_vm_active(STATE_DIR, vm_name)
+        prep_elapsed = time.monotonic() - prep_started
+        print(f"  mutagen preparation elapsed: {prep_elapsed:.1f}s")
+        print("Mutagen sync active (bidirectional):")
+        for spec in specs:
+            print(f"  {spec.kind}: {spec.host_path} <-> {spec.guest_path}")
+        emit_sync_event(
+            STATE_DIR,
+            vm_name,
+            event="activate_ok",
+            actor="orchestrator",
+            reason=reason,
+            details={"session_spec_count": len(specs), "elapsed_seconds": round(prep_elapsed, 1)},
+        )
+    except Exception as exc:
+        emit_sync_event(
+            STATE_DIR,
+            vm_name,
+            event="activate_error",
+            actor="orchestrator",
+            reason=reason,
+            details={"error_type": type(exc).__name__, "error": str(exc)},
+        )
+        if isinstance(exc, MutagenError):
+            raise UserFacingError(str(exc)) from exc
+        raise
 
 
-def _activate_mutagen_sync_from_locks(vm_name: str, tart: TartClient) -> None:
+def _activate_mutagen_sync_from_locks(
+    vm_name: str, tart: TartClient, *, reason: str = "activate_from_locks"
+) -> None:
     locked_paths = _host_paths_from_locks(vm_name)
     source_path = locked_paths.get(OPENCLAW_SOURCE_LOCK, "")
     payload_path = locked_paths.get(OPENCLAW_PAYLOAD_LOCK, "")
@@ -648,14 +678,39 @@ def _activate_mutagen_sync_from_locks(vm_name: str, tart: TartClient) -> None:
         signal_payload=signal_path,
         tart=tart,
         auth_mode="bootstrap_admin",
+        reason=reason,
     )
 
 
-def _deactivate_mutagen_sync(vm_name: str, *, flush: bool) -> None:
+def _deactivate_mutagen_sync(vm_name: str, *, flush: bool, reason: str = "unspecified") -> None:
+    emit_sync_event(
+        STATE_DIR,
+        vm_name,
+        event="teardown_start",
+        actor="orchestrator",
+        reason=reason,
+        details={"flush": flush},
+    )
     try:
         teardown_vm_sync(STATE_DIR, vm_name, flush=flush)
     except MutagenError as exc:
+        emit_sync_event(
+            STATE_DIR,
+            vm_name,
+            event="teardown_error",
+            actor="orchestrator",
+            reason=reason,
+            details={"flush": flush, "error_type": type(exc).__name__, "error": str(exc)},
+        )
         raise UserFacingError(str(exc)) from exc
+    emit_sync_event(
+        STATE_DIR,
+        vm_name,
+        event="teardown_ok",
+        actor="orchestrator",
+        reason=reason,
+        details={"flush": flush},
+    )
 
 
 def create_vm(vm_number: int, tart: TartClient) -> None:
@@ -722,6 +777,7 @@ def launch_vm(
                 signal_payload=signal_payload,
                 tart=tart,
                 auth_mode=launch_sync_auth_mode,
+                reason="launch_vm_already_running",
             )
         return
 
@@ -785,6 +841,7 @@ def launch_vm(
             signal_payload=signal_payload,
             tart=tart,
             auth_mode=launch_sync_auth_mode,
+            reason="launch_vm_after_start",
         )
 
 
@@ -1090,7 +1147,7 @@ def provision_vm(opts: ProvisionOptions, tart: TartClient) -> None:
     print(f"  vm ip: {vm_ip}")
     inventory_path = f"{vm_ip},"
     if opts.profile == "developer" and not opts.skip_sync_activation:
-        _activate_mutagen_sync_from_locks(vm_name, tart)
+        _activate_mutagen_sync_from_locks(vm_name, tart, reason="provision_vm")
 
     if opts.profile == "developer" and opts.enable_signal_payload:
         _preflight_signal_payload_marker(
@@ -1161,7 +1218,7 @@ class UpOptions:
 
 def _stop_vm_and_wait(tart: TartClient, vm_name: str, timeout_seconds: int) -> bool:
     stop_vm_watcher(STATE_DIR, vm_name)
-    _deactivate_mutagen_sync(vm_name, flush=True)
+    _deactivate_mutagen_sync(vm_name, flush=True, reason="_stop_vm_and_wait")
     tart.stop(vm_name)
     waited = 0
     while waited < timeout_seconds:
@@ -1442,6 +1499,7 @@ def up(opts: UpOptions, tart: TartClient) -> None:
             signal_payload=opts.signal_payload,
             tart=tart,
             auth_mode="vm_user",
+            reason="up_existing_running_vm",
         )
 
     if tart.vm_running(vm_name):
@@ -1481,7 +1539,7 @@ def down_vm(vm_number: int, tart: TartClient) -> None:
     vm_name = vm_name_for(vm_number)
     if not tart.vm_exists(vm_name):
         stop_vm_watcher(STATE_DIR, vm_name)
-        _deactivate_mutagen_sync(vm_name, flush=False)
+        _deactivate_mutagen_sync(vm_name, flush=False, reason="down_vm_missing")
         cleanup_locks_for_vm(vm_name)
         print(f"VM '{vm_name}' does not exist.")
         return
@@ -1498,7 +1556,7 @@ def down_vm(vm_number: int, tart: TartClient) -> None:
         print(f"VM '{vm_name}' is already stopped.")
 
     stop_vm_watcher(STATE_DIR, vm_name)
-    _deactivate_mutagen_sync(vm_name, flush=False)
+    _deactivate_mutagen_sync(vm_name, flush=False, reason="down_vm")
     cleanup_locks_for_vm(vm_name)
 
 
@@ -1508,7 +1566,7 @@ def delete_vm(vm_number: int, tart: TartClient) -> None:
 
     if not tart.vm_exists(vm_name):
         stop_vm_watcher(STATE_DIR, vm_name)
-        _deactivate_mutagen_sync(vm_name, flush=False)
+        _deactivate_mutagen_sync(vm_name, flush=False, reason="delete_vm_missing")
         marker_file.unlink(missing_ok=True)
         cleanup_locks_for_vm(vm_name)
         print(f"VM '{vm_name}' does not exist.")
@@ -1532,7 +1590,7 @@ def delete_vm(vm_number: int, tart: TartClient) -> None:
 
     marker_file.unlink(missing_ok=True)
     stop_vm_watcher(STATE_DIR, vm_name)
-    _deactivate_mutagen_sync(vm_name, flush=False)
+    _deactivate_mutagen_sync(vm_name, flush=False, reason="delete_vm")
     cleanup_locks_for_vm(vm_name)
     print(f"Deleted VM: {vm_name}")
 
