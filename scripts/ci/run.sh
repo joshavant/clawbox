@@ -37,9 +37,12 @@ run_fast() {
 	require_cmd shfmt
 	require_cmd yamllint
 	require_cmd actionlint
+	require_cmd rsync
 
 	echo "==> validate.sh"
 	./scripts/validate.sh
+
+	run_packaging_smoke
 
 	echo "==> shfmt"
 	shfmt -d scripts
@@ -51,6 +54,36 @@ run_fast() {
 	actionlint
 
 	echo "Fast checks passed."
+}
+
+run_packaging_smoke() {
+	echo "==> packaging smoke (wheel build)"
+
+	if ! python3 -m pip --version >/dev/null 2>&1; then
+		echo "Error: python3 -m pip is required for packaging smoke checks."
+		exit 1
+	fi
+
+	(
+		set -euo pipefail
+		local tmp_source
+		local tmp_wheels
+		tmp_source="$(mktemp -d "${TMPDIR:-/tmp}/clawbox-wheel-src.XXXXXX")"
+		tmp_wheels="$(mktemp -d "${TMPDIR:-/tmp}/clawbox-wheel-out.XXXXXX")"
+		trap 'rm -rf "$tmp_source" "$tmp_wheels"' EXIT
+
+		rsync -a \
+			--exclude '.git' \
+			--exclude '.venv' \
+			--exclude '.pytest_cache' \
+			--exclude '__pycache__' \
+			--exclude '.mypy_cache' \
+			--exclude 'build' \
+			--exclude 'dist' \
+			"$PROJECT_DIR/" "$tmp_source/"
+
+		python3 -m pip wheel --no-deps "$tmp_source" -w "$tmp_wheels"
+	)
 }
 
 run_cli_smoke() {

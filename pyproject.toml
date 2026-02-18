@@ -65,10 +65,6 @@ include = ["clawbox*"]
 "share/clawbox/ansible/roles/signal_cli/tasks" = [
   "ansible/roles/signal_cli/tasks/main.yml",
 ]
-"share/clawbox/ansible/roles/signal_cli/templates" = [
-  "ansible/roles/signal_cli/templates/com.clawbox.signal-cli-payload-sync.plist.j2",
-  "ansible/roles/signal_cli/templates/sync-signal-cli-payload.sh.j2",
-]
 "share/clawbox/ansible/roles/system/tasks" = [
   "ansible/roles/system/tasks/main.yml",
 ]

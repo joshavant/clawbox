@@ -25,10 +25,10 @@ def test_readme_and_developer_guide_define_orchestration_only_contract() -> None
 def test_readme_uses_clawbox_safe_watch_recipe() -> None:
     readme = (PROJECT_DIR / "README.md").read_text(encoding="utf-8")
     guide = (PROJECT_DIR / "DEVELOPER.md").read_text(encoding="utf-8")
-    assert "scripts/run-node.mjs gateway --force" in readme
-    assert "--watch-path src --watch-path tsconfig.json --watch-path package.json" in readme
+    assert "pnpm gateway:watch\n" in readme
+    assert "scripts/run-node.mjs gateway --force" not in readme
+    assert "--watch-path src --watch-path tsconfig.json --watch-path package.json" not in readme
     assert "PATH=/opt/homebrew/bin:$PATH" not in readme
-    assert "pnpm gateway:watch\n" not in readme
     assert "pnpm gateway:watch --force" not in readme
     assert "pnpm gateway:watch\n" in guide
     assert "pnpm gateway:watch --force" not in guide
