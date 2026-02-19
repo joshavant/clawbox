@@ -32,6 +32,12 @@ class IntegrationError(RuntimeError):
 SIGNAL_PAYLOAD_MOUNT = group_var_scalar(
     "signal_cli_payload_mount", "/Users/Shared/clawbox-sync/signal-cli-payload"
 )
+OPENCLAW_SOURCE_MOUNT = group_var_scalar(
+    "openclaw_source_mount", "/Users/Shared/clawbox-sync/openclaw-source"
+)
+OPENCLAW_PAYLOAD_MOUNT = group_var_scalar(
+    "openclaw_payload_mount", "/Users/Shared/clawbox-sync/openclaw-payload"
+)
 SIGNAL_PAYLOAD_MARKER_FILENAME = group_var_scalar(
     "signal_cli_payload_marker_filename", ".clawbox-signal-payload-host-marker"
 )
@@ -327,6 +333,26 @@ class IntegrationRunner:
         )
         return proc.returncode == 0
 
+    def run_ansible_shell_capture(self, vm_name: str, shell_cmd: str) -> subprocess.CompletedProcess[str]:
+        cmd = build_ansible_shell_command(
+            inventory_path="ansible/inventory/tart_inventory.py",
+            vm_name=vm_name,
+            shell_cmd=shell_cmd,
+            ansible_user=vm_name,
+            ansible_password=self.vm_password,
+            connect_timeout_seconds=self.config.ansible_connect_timeout,
+            command_timeout_seconds=self.config.ansible_command_timeout,
+            become=False,
+        )
+        return subprocess.run(
+            cmd,
+            check=False,
+            text=True,
+            capture_output=True,
+            cwd=self.project_dir,
+            env=build_ansible_env(),
+        )
+
     def wait_for_remote_shell(self, vm_name: str, timeout_seconds: int | None = None) -> None:
         timeout = timeout_seconds if timeout_seconds is not None else self.config.remote_shell_timeout_seconds
         marker_file = self.ready_marker_dir / f"{vm_name}.ready"
@@ -361,6 +387,33 @@ class IntegrationRunner:
         if self.run_ansible_shell(vm_name, cmd):
             return
         self.fail(f"Assertion failed on '{vm_name}': command '{' '.join(args)}'")
+
+    def assert_remote_paths_not_world_writable(self, vm_name: str, paths: list[str]) -> None:
+        self.wait_for_remote_shell(vm_name)
+        quoted_paths = " ".join(shlex.quote(path) for path in paths)
+        shell_cmd = (
+            "set -e; "
+            "bad=0; "
+            f"for path in {quoted_paths}; do "
+            "if [ ! -d \"$path\" ]; then continue; fi; "
+            "offender=\"$(find \"$path\" -perm -0002 -print -quit 2>/dev/null || true)\"; "
+            "if [ -n \"$offender\" ]; then "
+            "printf '%s=%s\\n' \"$path\" \"$offender\"; "
+            "bad=1; "
+            "fi; "
+            "done; "
+            "exit $bad"
+        )
+        proc = self.run_ansible_shell_capture(vm_name, shell_cmd)
+        if proc.returncode == 0:
+            return
+        details = (proc.stdout or proc.stderr or "").strip()
+        self.fail(
+            "Assertion failed: expected synced guest paths to avoid world-writable entries\n"
+            f"  vm: {vm_name}\n"
+            f"  paths: {', '.join(paths)}\n"
+            f"  offenders (path=first-world-writable-entry):\n{details}"
+        )
 
     def read_status_text(self, vm_number: int) -> str:
         status_output = self.run_cmd(
@@ -954,6 +1007,10 @@ class IntegrationRunner:
         self.assert_file_contains(self.marker_path(self.developer_vm_name), "sync_backend: mutagen")
         self.assert_file_contains(self.marker_path(self.developer_vm_name), "signal_cli: true")
         self.assert_file_contains(self.marker_path(self.developer_vm_name), "signal_payload: true")
+        self.assert_remote_paths_not_world_writable(
+            self.developer_vm_name,
+            [OPENCLAW_SOURCE_MOUNT, OPENCLAW_PAYLOAD_MOUNT, SIGNAL_PAYLOAD_MOUNT],
+        )
         self.assert_remote_test(
             self.developer_vm_name,
             f"test -L '/Users/{self.developer_vm_name}/Developer/openclaw'",

@@ -452,7 +452,8 @@ def _prepare_remote_mutagen_targets(
         clauses.append(f"path={guest}")
         clauses.append('if [ -L "$path" ]; then rm "$path"; fi')
         clauses.append('mkdir -p "$path"')
-        clauses.append('chmod -R a+rwX "$path"')
+        clauses.append('chmod -R u+rwX,g+rwX,o+rX "$path"')
+        clauses.append('chmod -R o-w "$path"')
     cmd = "; ".join(clauses)
 
     proc = _ansible_shell(
