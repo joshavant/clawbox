@@ -12,6 +12,9 @@ All notable changes to this project are documented in this file.
 - test(integration): add `mutagen-contract` profile to verify `active` then `inactive/no active sessions found` status behavior
 - ci: add manual-only integration workflow (`workflow_dispatch`) for Mutagen contract checks
 - docs: update developer testing guidance for logic-vs-integration Mutagen boundaries and CI trigger split
+- fix(sync): harden remote Mutagen target prep to remove world-writable bits on developer sync trees
+- test(logic): assert `_prepare_remote_mutagen_targets` does not emit world-writable chmods and remediates `o+w`
+- test(integration): assert synced guest developer mounts avoid world-writable entries after developer `up`
 
 ## v1.2.3
 

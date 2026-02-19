@@ -467,6 +467,11 @@ def test_prepare_remote_mutagen_targets_maps_failure(monkeypatch: pytest.MonkeyP
             host_path=Path("/tmp/payload"),
             guest_path="/Users/Shared/clawbox-sync/openclaw-payload",
         ),
+        orchestrator.SessionSpec(
+            kind="signal-payload",
+            host_path=Path("/tmp/signal"),
+            guest_path="/Users/Shared/clawbox-sync/signal-cli-payload",
+        ),
     ]
     seen_cmds: list[str] = []
     monkeypatch.setattr(
@@ -483,6 +488,11 @@ def test_prepare_remote_mutagen_targets_maps_failure(monkeypatch: pytest.MonkeyP
     )
     assert seen_cmds
     assert 'if [ -L "$path" ]; then rm "$path"; fi' in seen_cmds[0]
+    assert 'chmod -R a+rwX "$path"' not in seen_cmds[0]
+    assert 'chmod -R u+rwX,g+rwX,o+rX "$path"' in seen_cmds[0]
+    assert 'chmod -R o-w "$path"' in seen_cmds[0]
+    assert seen_cmds[0].count('chmod -R u+rwX,g+rwX,o+rX "$path"') == len(specs)
+    assert seen_cmds[0].count('chmod -R o-w "$path"') == len(specs)
 
     monkeypatch.setattr(
         orchestrator,
