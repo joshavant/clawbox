@@ -132,12 +132,29 @@ Run tiers directly:
 
 ./scripts/ci/bootstrap.sh logic
 ./scripts/ci/run.sh logic
+
+./scripts/ci/bootstrap.sh integration
+CLAWBOX_CI_PROFILE=mutagen-contract ./scripts/ci/run.sh integration
 ```
 
-For integration details and CI trigger behavior:
+VM number convention for automated tests:
 
-1. `docs/ci-testing-strategy.md`
-2. `docs/ci-matrix.md`
+1. Use only reserved test VM numbers in the 90s (`91-99`) for test code and defaults.
+2. Do not use low-number VMs (`1`, `2`, etc.) in automated tests.
+3. Keep fast/logic tests host-safe: they must not target developer day-to-day VMs.
+4. Policy enforcement lives in `tests/logic_py/test_vm_number_policy.py`.
+
+Mutagen test boundary:
+
+1. `tests/logic_py` stays fast and hermetic. Logic tests stub Mutagen CLI behavior.
+2. Real Mutagen lifecycle behavior is validated in `tests/integration_py/run_integration.py`.
+3. The integration `mutagen-contract` profile asserts `clawbox status` reports `mutagen sync: active` when sessions are healthy.
+4. The integration `mutagen-contract` profile asserts `clawbox status` reports `mutagen sync: inactive` with `no active sessions found` after sessions are terminated.
+
+CI trigger split:
+
+1. Pull requests run fast + logic checks (`.github/workflows/ci.yml`).
+2. Integration checks are manual-only via `workflow_dispatch` (`.github/workflows/integration.yml`).
 
 ## Release Notes (Maintainers)
 

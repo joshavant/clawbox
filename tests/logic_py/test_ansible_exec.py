@@ -12,15 +12,15 @@ from clawbox.errors import UserFacingError
 def test_build_ansible_shell_command_defaults() -> None:
     cmd = ansible_exec.build_ansible_shell_command(
         inventory_path="192.168.64.10,",
-        vm_name="clawbox-1",
+        vm_name="clawbox-91",
         shell_cmd="true",
-        ansible_user="clawbox-1",
+        ansible_user="clawbox-91",
         ansible_password="secret",
         connect_timeout_seconds=8,
         command_timeout_seconds=30,
         become=False,
     )
-    assert cmd[:6] == ["ansible", "-i", "192.168.64.10,", "clawbox-1", "-T", "8"]
+    assert cmd[:6] == ["ansible", "-i", "192.168.64.10,", "clawbox-91", "-T", "8"]
     assert "ansible_become=false" in cmd
     assert "-b" not in cmd
     assert "ansible_become=true" not in cmd
@@ -29,9 +29,9 @@ def test_build_ansible_shell_command_defaults() -> None:
 def test_build_ansible_shell_command_become_true() -> None:
     cmd = ansible_exec.build_ansible_shell_command(
         inventory_path="192.168.64.11,",
-        vm_name="clawbox-2",
+        vm_name="clawbox-92",
         shell_cmd="id",
-        ansible_user="clawbox-2",
+        ansible_user="clawbox-92",
         ansible_password="pw",
         connect_timeout_seconds=10,
         command_timeout_seconds=60,
@@ -66,7 +66,7 @@ def test_run_ansible_shell_runs_with_expected_params(monkeypatch: pytest.MonkeyP
     proc = ansible_exec.run_ansible_shell(
         ansible_dir=tmp_path,
         inventory_path="inventory/tart_inventory.py",
-        vm_name="clawbox-1",
+        vm_name="clawbox-91",
         shell_cmd="echo hi",
         ansible_user="admin",
         ansible_password="admin",
@@ -92,7 +92,7 @@ def test_run_ansible_shell_maps_missing_ansible(monkeypatch: pytest.MonkeyPatch,
         ansible_exec.run_ansible_shell(
             ansible_dir=tmp_path,
             inventory_path="inventory/tart_inventory.py",
-            vm_name="clawbox-1",
+            vm_name="clawbox-91",
             shell_cmd="true",
             ansible_user="admin",
             ansible_password="admin",

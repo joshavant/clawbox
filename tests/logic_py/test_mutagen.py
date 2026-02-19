@@ -18,18 +18,18 @@ def test_ensure_mutagen_ssh_alias_writes_include_and_host_block(
         mutagen_mod, "_MUTAGEN_SSH_CONFIG_PATH", tmp_path / ".ssh" / "clawbox_mutagen_config"
     )
     alias = mutagen_mod.ensure_mutagen_ssh_alias(
-        "clawbox-1",
+        "clawbox-91",
         "192.168.64.201",
-        "clawbox-1",
+        "clawbox-91",
         tmp_path / "id_ed25519",
     )
-    assert alias == "clawbox-mutagen-clawbox-1"
+    assert alias == "clawbox-mutagen-clawbox-91"
 
     main_config = tmp_path / ".ssh" / "config"
     managed_config = tmp_path / ".ssh" / "clawbox_mutagen_config"
     assert "Include ~/.ssh/clawbox_mutagen_config" in main_config.read_text(encoding="utf-8")
     managed = managed_config.read_text(encoding="utf-8")
-    assert "Host clawbox-mutagen-clawbox-1" in managed
+    assert "Host clawbox-mutagen-clawbox-91" in managed
     assert "HostName 192.168.64.201" in managed
 
 
@@ -41,14 +41,14 @@ def test_remove_mutagen_ssh_alias_removes_block(
         mutagen_mod, "_MUTAGEN_SSH_CONFIG_PATH", tmp_path / ".ssh" / "clawbox_mutagen_config"
     )
     mutagen_mod.ensure_mutagen_ssh_alias(
-        "clawbox-1",
+        "clawbox-91",
         "192.168.64.201",
-        "clawbox-1",
+        "clawbox-91",
         tmp_path / "id_ed25519",
     )
-    mutagen_mod.remove_mutagen_ssh_alias("clawbox-1")
+    mutagen_mod.remove_mutagen_ssh_alias("clawbox-91")
     managed = (tmp_path / ".ssh" / "clawbox_mutagen_config").read_text(encoding="utf-8")
-    assert "CLAWBOX MUTAGEN BEGIN clawbox-1" not in managed
+    assert "CLAWBOX MUTAGEN BEGIN clawbox-91" not in managed
 
 
 def test_ensure_vm_sessions_creates_bidirectional_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,20 +61,20 @@ def test_ensure_vm_sessions_creates_bidirectional_sessions(monkeypatch: pytest.M
     )
 
     mutagen_mod.ensure_vm_sessions(
-        "clawbox-1",
-        "clawbox-mutagen-clawbox-1",
+        "clawbox-91",
+        "clawbox-mutagen-clawbox-91",
         [
             mutagen_mod.SessionSpec(
                 kind="openclaw-source",
                 host_path=Path("/tmp/source"),
-                guest_path="/Users/clawbox-1/Developer/openclaw",
+                guest_path="/Users/clawbox-91/Developer/openclaw",
                 ignore_vcs=True,
                 ignored_paths=("node_modules",),
             ),
             mutagen_mod.SessionSpec(
                 kind="openclaw-payload",
                 host_path=Path("/tmp/payload"),
-                guest_path="/Users/clawbox-1/.openclaw",
+                guest_path="/Users/clawbox-91/.openclaw",
             ),
         ],
     )
@@ -85,13 +85,13 @@ def test_ensure_vm_sessions_creates_bidirectional_sessions(monkeypatch: pytest.M
     assert any("--ignore-vcs" in call for call in create_commands)
     assert any("--ignore" in call and "node_modules" in call for call in create_commands)
     flush_commands = [call for call in calls if call[:2] == ["sync", "flush"]]
-    assert flush_commands == [["sync", "flush", "--label-selector", "clawbox.vm=clawbox-1"]]
+    assert flush_commands == [["sync", "flush", "--label-selector", "clawbox.vm=clawbox-91"]]
 
 
 def test_reconcile_vm_sync_tears_down_inactive_vm(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    mutagen_mod.mark_vm_active(tmp_path, "clawbox-2")
+    mutagen_mod.mark_vm_active(tmp_path, "clawbox-92")
 
     class _Tart:
         def vm_running(self, _vm_name: str) -> bool:
@@ -113,10 +113,10 @@ def test_reconcile_vm_sync_tears_down_inactive_vm(
     )
 
     mutagen_mod.reconcile_vm_sync(_Tart(), tmp_path)
-    assert torn_down == ["clawbox-2"]
+    assert torn_down == ["clawbox-92"]
     assert events == [
-        ("clawbox-2", "reconcile_teardown_triggered", "vm_not_running"),
-        ("clawbox-2", "reconcile_teardown_ok", "vm_not_running"),
+        ("clawbox-92", "reconcile_teardown_triggered", "vm_not_running"),
+        ("clawbox-92", "reconcile_teardown_ok", "vm_not_running"),
     ]
 
 
@@ -127,7 +127,7 @@ def test_terminate_vm_sessions_is_noop_without_mutagen(monkeypatch: pytest.Monke
         "_run_mutagen",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not run mutagen")),
     )
-    mutagen_mod.terminate_vm_sessions("clawbox-1", flush=True)
+    mutagen_mod.terminate_vm_sessions("clawbox-91", flush=True)
 
 
 def test_vm_sessions_exist_uses_label_selector(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -141,13 +141,13 @@ def test_vm_sessions_exist_uses_label_selector(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(mutagen_mod, "_run_mutagen", fake_run)
 
-    assert mutagen_mod.vm_sessions_exist("clawbox-1") is True
+    assert mutagen_mod.vm_sessions_exist("clawbox-91") is True
     assert seen == [
         [
             "sync",
             "list",
             "--label-selector",
-            "clawbox.vm=clawbox-1",
+            "clawbox.vm=clawbox-91",
             "--template",
             '{{range .}}{{.Identifier}}{{"\\n"}}{{end}}',
         ]
@@ -164,7 +164,7 @@ def test_vm_sessions_status_prefers_stdout(monkeypatch: pytest.MonkeyPatch) -> N
         ),
     )
 
-    assert mutagen_mod.vm_sessions_status("clawbox-1") == "session status"
+    assert mutagen_mod.vm_sessions_status("clawbox-91") == "session status"
 
 
 def test_run_mutagen_maps_process_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -235,17 +235,17 @@ def test_remove_named_block_noop_when_file_missing(tmp_path: Path) -> None:
 def test_ensure_vm_sessions_requires_mutagen(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mutagen_mod, "mutagen_available", lambda: False)
     with pytest.raises(mutagen_mod.MutagenError, match="Command not found: mutagen"):
-        mutagen_mod.ensure_vm_sessions("clawbox-1", "alias", [])
+        mutagen_mod.ensure_vm_sessions("clawbox-91", "alias", [])
 
 
 def test_vm_sessions_exist_false_when_mutagen_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mutagen_mod, "mutagen_available", lambda: False)
-    assert mutagen_mod.vm_sessions_exist("clawbox-1") is False
+    assert mutagen_mod.vm_sessions_exist("clawbox-91") is False
 
 
 def test_vm_sessions_status_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mutagen_mod, "mutagen_available", lambda: False)
-    assert mutagen_mod.vm_sessions_status("clawbox-1") == "mutagen not available"
+    assert mutagen_mod.vm_sessions_status("clawbox-91") == "mutagen not available"
 
     monkeypatch.setattr(mutagen_mod, "mutagen_available", lambda: True)
     monkeypatch.setattr(
@@ -255,7 +255,7 @@ def test_vm_sessions_status_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
             args=args, returncode=0, stdout="", stderr="only stderr"
         ),
     )
-    assert mutagen_mod.vm_sessions_status("clawbox-1") == "only stderr"
+    assert mutagen_mod.vm_sessions_status("clawbox-91") == "only stderr"
 
 
 def test_active_vm_registry_handles_invalid_payloads(tmp_path: Path) -> None:
@@ -271,17 +271,17 @@ def test_active_vm_registry_handles_invalid_payloads(tmp_path: Path) -> None:
     path.write_text(json.dumps({"vms": "bad"}), encoding="utf-8")
     assert mutagen_mod._read_active_vms(path) == []
 
-    path.write_text(json.dumps({"vms": ["clawbox-2", "", 123, "clawbox-2"]}), encoding="utf-8")
-    assert mutagen_mod._read_active_vms(path) == ["clawbox-2"]
+    path.write_text(json.dumps({"vms": ["clawbox-92", "", 123, "clawbox-92"]}), encoding="utf-8")
+    assert mutagen_mod._read_active_vms(path) == ["clawbox-92"]
 
 
 def test_clear_vm_active_and_teardown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    mutagen_mod.mark_vm_active(tmp_path, "clawbox-1")
-    mutagen_mod.mark_vm_active(tmp_path, "clawbox-2")
-    assert sorted(mutagen_mod.active_vms(tmp_path)) == ["clawbox-1", "clawbox-2"]
+    mutagen_mod.mark_vm_active(tmp_path, "clawbox-91")
+    mutagen_mod.mark_vm_active(tmp_path, "clawbox-92")
+    assert sorted(mutagen_mod.active_vms(tmp_path)) == ["clawbox-91", "clawbox-92"]
 
-    mutagen_mod.clear_vm_active(tmp_path, "clawbox-1")
-    assert mutagen_mod.active_vms(tmp_path) == ["clawbox-2"]
+    mutagen_mod.clear_vm_active(tmp_path, "clawbox-91")
+    assert mutagen_mod.active_vms(tmp_path) == ["clawbox-92"]
 
     seen: list[str] = []
     monkeypatch.setattr(
@@ -290,13 +290,13 @@ def test_clear_vm_active_and_teardown(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         mutagen_mod, "remove_mutagen_ssh_alias", lambda vm_name: seen.append(f"remove:{vm_name}")
     )
-    mutagen_mod.teardown_vm_sync(tmp_path, "clawbox-2", flush=True)
-    assert seen == ["terminate:clawbox-2:True", "remove:clawbox-2"]
+    mutagen_mod.teardown_vm_sync(tmp_path, "clawbox-92", flush=True)
+    assert seen == ["terminate:clawbox-92:True", "remove:clawbox-92"]
     assert mutagen_mod.active_vms(tmp_path) == []
 
 
 def test_reconcile_vm_sync_ignores_tart_errors(tmp_path: Path) -> None:
-    mutagen_mod.mark_vm_active(tmp_path, "clawbox-2")
+    mutagen_mod.mark_vm_active(tmp_path, "clawbox-92")
 
     class _Tart:
         def vm_running(self, _vm_name: str) -> bool:

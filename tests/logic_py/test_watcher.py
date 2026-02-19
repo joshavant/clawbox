@@ -34,9 +34,9 @@ def test_start_vm_watcher_launches_and_writes_record(
 ) -> None:
     monkeypatch.setattr(watcher_mod.subprocess, "Popen", lambda *_args, **_kwargs: _Proc(pid=4242))
     monkeypatch.setattr(watcher_mod.time, "sleep", lambda *_args, **_kwargs: None)
-    pid = watcher_mod.start_vm_watcher(tmp_path, "clawbox-1", poll_seconds=3)
+    pid = watcher_mod.start_vm_watcher(tmp_path, "clawbox-91", poll_seconds=3)
     assert pid == 4242
-    record = _read_json(_record_path(tmp_path, "clawbox-1"))
+    record = _read_json(_record_path(tmp_path, "clawbox-91"))
     assert record["pid"] == 4242
     assert record["poll_seconds"] == 3
 
@@ -44,12 +44,12 @@ def test_start_vm_watcher_launches_and_writes_record(
 def test_start_vm_watcher_reuses_live_existing_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    record_file = _record_path(tmp_path, "clawbox-1")
+    record_file = _record_path(tmp_path, "clawbox-91")
     record_file.parent.mkdir(parents=True, exist_ok=True)
     record_file.write_text(
         json.dumps(
             {
-                "vm_name": "clawbox-1",
+                "vm_name": "clawbox-91",
                 "pid": 9991,
                 "poll_seconds": 2,
                 "started_at": "2026-01-01T00:00:00Z",
@@ -68,7 +68,7 @@ def test_start_vm_watcher_reuses_live_existing_record(
         return _Proc(pid=1)
 
     monkeypatch.setattr(watcher_mod.subprocess, "Popen", _unexpected_popen)
-    pid = watcher_mod.start_vm_watcher(tmp_path, "clawbox-1")
+    pid = watcher_mod.start_vm_watcher(tmp_path, "clawbox-91")
     assert pid == 9991
     assert called["popen"] is False
 
@@ -76,12 +76,12 @@ def test_start_vm_watcher_reuses_live_existing_record(
 def test_stop_vm_watcher_signals_and_removes_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    record_file = _record_path(tmp_path, "clawbox-1")
+    record_file = _record_path(tmp_path, "clawbox-91")
     record_file.parent.mkdir(parents=True, exist_ok=True)
     record_file.write_text(
         json.dumps(
             {
-                "vm_name": "clawbox-1",
+                "vm_name": "clawbox-91",
                 "pid": 7777,
                 "poll_seconds": 2,
                 "started_at": "2026-01-01T00:00:00Z",
@@ -103,7 +103,7 @@ def test_stop_vm_watcher_signals_and_removes_record(
     monkeypatch.setattr(watcher_mod, "_signal_watcher_pid", lambda _pid, sig: signals.append(sig))
     monkeypatch.setattr(watcher_mod.time, "sleep", lambda *_args, **_kwargs: None)
 
-    stopped = watcher_mod.stop_vm_watcher(tmp_path, "clawbox-1")
+    stopped = watcher_mod.stop_vm_watcher(tmp_path, "clawbox-91")
     assert stopped is True
     assert signals == [signal.SIGTERM]
     assert not record_file.exists()
@@ -112,7 +112,7 @@ def test_stop_vm_watcher_signals_and_removes_record(
 def test_reconcile_vm_watchers_stops_dead_vm_watchers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    vm_name = "clawbox-2"
+    vm_name = "clawbox-92"
     record_file = _record_path(tmp_path, vm_name)
     record_file.parent.mkdir(parents=True, exist_ok=True)
     record_file.write_text(
@@ -146,7 +146,7 @@ def test_reconcile_vm_watchers_stops_dead_vm_watchers(
 def test_run_vm_watcher_loop_cleans_locks_and_removes_own_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    vm_name = "clawbox-3"
+    vm_name = "clawbox-93"
     record_file = _record_path(tmp_path, vm_name)
     record_file.parent.mkdir(parents=True, exist_ok=True)
     record_file.write_text(
@@ -172,6 +172,7 @@ def test_run_vm_watcher_loop_cleans_locks_and_removes_own_record(
 
     cleaned: list[str] = []
     monkeypatch.setattr(watcher_mod, "cleanup_locks_for_vm", lambda name: cleaned.append(name))
+    monkeypatch.setattr(watcher_mod, "teardown_vm_sync", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(watcher_mod.time, "sleep", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(watcher_mod.signal, "signal", lambda *_args, **_kwargs: None)
 
@@ -181,7 +182,7 @@ def test_run_vm_watcher_loop_cleans_locks_and_removes_own_record(
 
 
 def test_read_record_invalid_payloads_return_none(tmp_path: Path) -> None:
-    record_file = _record_path(tmp_path, "clawbox-1")
+    record_file = _record_path(tmp_path, "clawbox-91")
     record_file.parent.mkdir(parents=True, exist_ok=True)
 
     record_file.write_text("not-json", encoding="utf-8")
@@ -225,9 +226,9 @@ def test_pid_cmdline_and_is_watcher_pid_fallbacks(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         watcher_mod,
         "_pid_cmdline",
-        lambda _pid: "python -m clawbox.main _watch-vm \"unterminated clawbox-1",
+        lambda _pid: "python -m clawbox.main _watch-vm \"unterminated clawbox-91",
     )
-    assert watcher_mod._is_watcher_pid(101, "clawbox-1") is True
+    assert watcher_mod._is_watcher_pid(101, "clawbox-91") is True
 
 
 def test_signal_watcher_pid_error_branches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -242,7 +243,7 @@ def test_signal_watcher_pid_error_branches(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_start_vm_watcher_rejects_nonpositive_poll_seconds(tmp_path: Path) -> None:
     with pytest.raises(watcher_mod.WatcherError, match="poll_seconds must be > 0"):
-        watcher_mod.start_vm_watcher(tmp_path, "clawbox-1", poll_seconds=0)
+        watcher_mod.start_vm_watcher(tmp_path, "clawbox-91", poll_seconds=0)
 
 
 def test_start_vm_watcher_maps_process_launch_errors(
@@ -254,7 +255,7 @@ def test_start_vm_watcher_maps_process_launch_errors(
         lambda *_args, **_kwargs: (_ for _ in ()).throw(FileNotFoundError()),
     )
     with pytest.raises(watcher_mod.WatcherError, match="Could not find Python executable"):
-        watcher_mod.start_vm_watcher(tmp_path, "clawbox-1")
+        watcher_mod.start_vm_watcher(tmp_path, "clawbox-91")
 
     monkeypatch.setattr(
         watcher_mod.subprocess,
@@ -262,7 +263,7 @@ def test_start_vm_watcher_maps_process_launch_errors(
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("cannot fork")),
     )
     with pytest.raises(watcher_mod.WatcherError, match="Could not launch watcher"):
-        watcher_mod.start_vm_watcher(tmp_path, "clawbox-1")
+        watcher_mod.start_vm_watcher(tmp_path, "clawbox-91")
 
 
 def test_start_vm_watcher_surfaces_early_exit_tail(
@@ -273,22 +274,22 @@ def test_start_vm_watcher_surfaces_early_exit_tail(
     monkeypatch.setattr(watcher_mod, "tail_lines", lambda *_args, **_kwargs: "watcher failed")
 
     with pytest.raises(watcher_mod.WatcherError, match="watcher failed to start"):
-        watcher_mod.start_vm_watcher(tmp_path, "clawbox-1")
+        watcher_mod.start_vm_watcher(tmp_path, "clawbox-91")
 
 
 def test_stop_vm_watcher_no_record_returns_false(tmp_path: Path) -> None:
-    assert watcher_mod.stop_vm_watcher(tmp_path, "clawbox-404") is False
+    assert watcher_mod.stop_vm_watcher(tmp_path, "clawbox-99") is False
 
 
 def test_stop_vm_watcher_escalates_to_sigkill(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    record_file = _record_path(tmp_path, "clawbox-1")
+    record_file = _record_path(tmp_path, "clawbox-91")
     record_file.parent.mkdir(parents=True, exist_ok=True)
     record_file.write_text(
         json.dumps(
             {
-                "vm_name": "clawbox-1",
+                "vm_name": "clawbox-91",
                 "pid": 9999,
                 "poll_seconds": 2,
                 "started_at": "2026-01-01T00:00:00Z",
@@ -303,7 +304,7 @@ def test_stop_vm_watcher_escalates_to_sigkill(
     monkeypatch.setattr(watcher_mod, "_signal_watcher_pid", lambda _pid, sig: seen_signals.append(sig))
     monkeypatch.setattr(watcher_mod.time, "sleep", lambda *_args, **_kwargs: None)
 
-    assert watcher_mod.stop_vm_watcher(tmp_path, "clawbox-1", timeout_seconds=0) is True
+    assert watcher_mod.stop_vm_watcher(tmp_path, "clawbox-91", timeout_seconds=0) is True
     assert seen_signals == [signal.SIGTERM, signal.SIGKILL]
 
 
@@ -315,11 +316,11 @@ def test_reconcile_vm_watchers_handles_invalid_records_and_dead_pids(
     bad_record = watchers_dir / "bad.json"
     bad_record.write_text("not-json", encoding="utf-8")
 
-    dead_record = _record_path(tmp_path, "clawbox-2")
+    dead_record = _record_path(tmp_path, "clawbox-92")
     dead_record.write_text(
         json.dumps(
             {
-                "vm_name": "clawbox-2",
+                "vm_name": "clawbox-92",
                 "pid": 2222,
                 "poll_seconds": 2,
                 "started_at": "2026-01-01T00:00:00Z",
@@ -331,14 +332,14 @@ def test_reconcile_vm_watchers_handles_invalid_records_and_dead_pids(
 
     class _Tart:
         def vm_running(self, vm_name: str) -> bool:
-            return vm_name == "clawbox-1"
+            return vm_name == "clawbox-91"
 
     monkeypatch.setattr(watcher_mod, "_pid_running", lambda _pid: False)
     cleaned: list[str] = []
     monkeypatch.setattr(watcher_mod, "cleanup_locks_for_vm", lambda name: cleaned.append(name))
 
     watcher_mod.reconcile_vm_watchers(_Tart(), tmp_path)
-    assert cleaned == ["clawbox-2"]
+    assert cleaned == ["clawbox-92"]
     assert not bad_record.exists()
     assert not dead_record.exists()
 
@@ -346,12 +347,12 @@ def test_reconcile_vm_watchers_handles_invalid_records_and_dead_pids(
 def test_reconcile_vm_watchers_ignores_tart_errors_for_dead_pids(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    record_file = _record_path(tmp_path, "clawbox-9")
+    record_file = _record_path(tmp_path, "clawbox-99")
     record_file.parent.mkdir(parents=True, exist_ok=True)
     record_file.write_text(
         json.dumps(
             {
-                "vm_name": "clawbox-9",
+                "vm_name": "clawbox-99",
                 "pid": 999,
                 "poll_seconds": 2,
                 "started_at": "2026-01-01T00:00:00Z",
@@ -377,7 +378,7 @@ def test_reconcile_vm_watchers_ignores_tart_errors_for_dead_pids(
 def test_run_vm_watcher_loop_handles_tart_errors_and_mutagen_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    vm_name = "clawbox-7"
+    vm_name = "clawbox-97"
     record_file = _record_path(tmp_path, vm_name)
     record_file.parent.mkdir(parents=True, exist_ok=True)
     record_file.write_text(
@@ -421,7 +422,7 @@ def test_run_vm_watcher_loop_handles_tart_errors_and_mutagen_errors(
 def test_run_vm_watcher_loop_requires_consecutive_not_running_polls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    vm_name = "clawbox-8"
+    vm_name = "clawbox-98"
     record_file = _record_path(tmp_path, vm_name)
     record_file.parent.mkdir(parents=True, exist_ok=True)
     record_file.write_text(

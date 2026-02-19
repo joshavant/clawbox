@@ -85,7 +85,8 @@ def test_ci_bootstrap_unknown_mode() -> None:
 def test_validate_script_with_stubbed_ansible_playbook(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    _write_stub(bin_dir, "ansible-playbook")
+    for cmd in ("ansible-playbook", "shellcheck", "ansible-lint"):
+        _write_stub(bin_dir, cmd)
 
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env['PATH']}"

@@ -35,18 +35,18 @@ def test_build_inventory_uses_tart_client_data():
     inventory_mod = _load_inventory_module()
     tart = FakeTart(
         vm_rows=[
-            {"Name": "clawbox-1", "Running": True},
-            {"Name": "clawbox-2", "Running": False},
+            {"Name": "clawbox-91", "Running": True},
+            {"Name": "clawbox-92", "Running": False},
             {"Name": "other-vm", "Running": True},
         ],
-        ip_map={"clawbox-1": "192.168.64.10"},
+        ip_map={"clawbox-91": "192.168.64.10"},
     )
 
     inventory = inventory_mod.build_inventory(tart=tart)
 
-    assert inventory["all"]["hosts"] == ["clawbox-1"]
-    assert inventory["_meta"]["hostvars"]["clawbox-1"]["ansible_host"] == "192.168.64.10"
-    assert inventory["_meta"]["hostvars"]["clawbox-1"]["vm_number"] == 1
+    assert inventory["all"]["hosts"] == ["clawbox-91"]
+    assert inventory["_meta"]["hostvars"]["clawbox-91"]["ansible_host"] == "192.168.64.10"
+    assert inventory["_meta"]["hostvars"]["clawbox-91"]["vm_number"] == 91
 
 
 def test_get_tart_vms_handles_tart_error():
@@ -68,7 +68,7 @@ def test_get_tart_ip_propagates_tart_error():
             raise TartError("no ip")
 
     with pytest.raises(TartError, match="no ip"):
-        inventory_mod.get_tart_ip(FailingTart(), "clawbox-1")
+        inventory_mod.get_tart_ip(FailingTart(), "clawbox-91")
 
 
 def test_main_exits_nonzero_when_tart_errors(monkeypatch: pytest.MonkeyPatch, capsys):

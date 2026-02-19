@@ -16,7 +16,7 @@ def test_emit_sync_event_appends_structured_json(tmp_path: Path) -> None:
     state_dir = tmp_path / "state"
     sync_events.emit_sync_event(
         state_dir,
-        "clawbox-1",
+        "clawbox-91",
         event="activate_ok",
         actor="orchestrator",
         reason="launch_vm",
@@ -27,7 +27,7 @@ def test_emit_sync_event_appends_structured_json(tmp_path: Path) -> None:
     assert path.exists()
     records = _read_json_lines(path)
     assert len(records) == 1
-    assert records[0]["vm"] == "clawbox-1"
+    assert records[0]["vm"] == "clawbox-91"
     assert records[0]["event"] == "activate_ok"
     assert records[0]["actor"] == "orchestrator"
     assert records[0]["reason"] == "launch_vm"
@@ -47,7 +47,7 @@ def test_emit_sync_event_rotates_when_size_limit_exceeded(
 
     sync_events.emit_sync_event(
         state_dir,
-        "clawbox-1",
+        "clawbox-91",
         event="teardown_ok",
         actor="orchestrator",
         reason="down_vm",

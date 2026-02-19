@@ -1,0 +1,28 @@
+---
+name: Integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutagen-contract:
+    name: Mutagen Contract
+    runs-on: macos-14
+    timeout-minutes: 90
+    env:
+      CLAWBOX_CI_PROFILE: mutagen-contract
+      CLAWBOX_CI_STANDARD_VM_NUMBER: "91"
+      CLAWBOX_CI_DEVELOPER_VM_NUMBER: "92"
+      CLAWBOX_CI_OPTIONAL_VM_NUMBER: "93"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bootstrap integration dependencies
+        run: ./scripts/ci/bootstrap.sh integration
+
+      - name: Run Mutagen integration contract
+        run: ./scripts/ci/run.sh integration

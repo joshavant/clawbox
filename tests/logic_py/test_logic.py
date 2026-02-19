@@ -91,16 +91,16 @@ def capture_stdout(fn):
 
 def test_create_vm_success(isolated_paths):
     tart = FakeTart()
-    out = capture_stdout(lambda: orchestrator.create_vm(1, tart))
-    assert tart.clone_calls == [(orchestrator.BASE_IMAGE, "clawbox-1")]
-    assert "Created VM: clawbox-1" in out
+    out = capture_stdout(lambda: orchestrator.create_vm(91, tart))
+    assert tart.clone_calls == [(orchestrator.BASE_IMAGE, "clawbox-91")]
+    assert "Created VM: clawbox-91" in out
 
 
 def test_create_vm_rejects_existing(isolated_paths):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
+    tart.exists["clawbox-91"] = True
     with pytest.raises(UserFacingError, match="already exists"):
-        orchestrator.create_vm(1, tart)
+        orchestrator.create_vm(91, tart)
 
 
 def test_create_vm_surfaces_virtualization_limit_hint(isolated_paths):
@@ -110,22 +110,22 @@ def test_create_vm_surfaces_virtualization_limit_hint(isolated_paths):
 
     tart = FailingTart()
     with pytest.raises(UserFacingError, match="Virtualization.framework may be refusing another VM"):
-        orchestrator.create_vm(1, tart)
+        orchestrator.create_vm(91, tart)
 
 
 def test_virtualization_hint_includes_tart_system_limit_phrase():
-    message = "The number of VMs exceeds the system limit (other running VMs: clawbox-1, clawbox-2)"
+    message = "The number of VMs exceeds the system limit (other running VMs: clawbox-91, clawbox-92)"
     hinted = orchestrator._with_virtualization_limit_hint(message)
     assert "Virtualization.framework may be refusing another VM" in hinted
 
 
 def test_launch_vm_headless_passes_no_graphics(isolated_paths, monkeypatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
+    tart.exists["clawbox-91"] = True
     monkeypatch.setattr(orchestrator, "_acquire_locks", lambda *args, **kwargs: None)
     out = capture_stdout(
         lambda: orchestrator.launch_vm(
-            vm_number=1,
+            vm_number=91,
             profile="standard",
             openclaw_source="",
             openclaw_payload="",
@@ -144,7 +144,7 @@ def test_launch_vm_developer_requires_mounts(isolated_paths):
     tart = FakeTart()
     with pytest.raises(UserFacingError, match="requires --openclaw-source and --openclaw-payload"):
         orchestrator.launch_vm(
-            vm_number=1,
+            vm_number=91,
             profile="developer",
             openclaw_source="",
             openclaw_payload="",
@@ -172,7 +172,7 @@ def test_launch_vm_missing_vm_has_no_lock_or_marker_side_effects(isolated_paths,
 
     with pytest.raises(UserFacingError, match="does not exist"):
         orchestrator.launch_vm(
-            vm_number=1,
+            vm_number=91,
             profile="developer",
             openclaw_source=str(source_dir),
             openclaw_payload=str(payload_dir),
@@ -187,14 +187,14 @@ def test_launch_vm_missing_vm_has_no_lock_or_marker_side_effects(isolated_paths,
 
 def test_launch_vm_surfaces_early_tart_exit(isolated_paths, monkeypatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
+    tart.exists["clawbox-91"] = True
     tart.next_proc = DummyProcess(pid=4321, poll_value=1)
     monkeypatch.setattr(orchestrator, "_acquire_locks", lambda *args, **kwargs: None)
     monkeypatch.setattr(orchestrator, "tail_lines", lambda *args, **kwargs: "simulated tart failure")
 
-    with pytest.raises(UserFacingError, match="tart run exited before 'clawbox-1' reached a running state"):
+    with pytest.raises(UserFacingError, match="tart run exited before 'clawbox-91' reached a running state"):
         orchestrator.launch_vm(
-            vm_number=1,
+            vm_number=91,
             profile="standard",
             openclaw_source="",
             openclaw_payload="",
@@ -206,14 +206,14 @@ def test_launch_vm_surfaces_early_tart_exit(isolated_paths, monkeypatch):
 
 def test_launch_vm_surfaces_running_timeout(isolated_paths, monkeypatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
+    tart.exists["clawbox-91"] = True
     monkeypatch.setattr(orchestrator, "_acquire_locks", lambda *args, **kwargs: None)
     monkeypatch.setattr(orchestrator, "wait_for_vm_running", lambda *args, **kwargs: False)
     monkeypatch.setattr(orchestrator, "tail_lines", lambda *args, **kwargs: "simulated timeout")
 
     with pytest.raises(UserFacingError, match="did not enter running state within 30s"):
         orchestrator.launch_vm(
-            vm_number=1,
+            vm_number=91,
             profile="standard",
             openclaw_source="",
             openclaw_payload="",
@@ -225,7 +225,7 @@ def test_launch_vm_surfaces_running_timeout(isolated_paths, monkeypatch):
 
 def test_launch_vm_running_vm_refreshes_lock_and_marker_work(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
 
@@ -251,7 +251,7 @@ def test_launch_vm_running_vm_refreshes_lock_and_marker_work(isolated_paths, mon
 
     out = capture_stdout(
         lambda: orchestrator.launch_vm(
-            vm_number=1,
+            vm_number=91,
             profile="developer",
             openclaw_source=str(source),
             openclaw_payload=str(payload),
@@ -260,7 +260,7 @@ def test_launch_vm_running_vm_refreshes_lock_and_marker_work(isolated_paths, mon
             tart=tart,
         )
     )
-    assert "VM 'clawbox-1' is already running." in out
+    assert "VM 'clawbox-91' is already running." in out
     assert lock_calls == ["called"]
     assert marker_calls == ["called"]
 
@@ -270,7 +270,7 @@ def test_up_standard_rejects_developer_flags(isolated_paths):
     with pytest.raises(UserFacingError, match="only valid in developer mode"):
         orchestrator.up(
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 openclaw_source="/tmp/src",
                 openclaw_payload="/tmp/payload",
@@ -290,7 +290,7 @@ def test_up_first_run_uses_headless_then_gui(isolated_paths, monkeypatch):
 
     def fake_create(vm_number, _tart):
         calls.append(f"create:{vm_number}")
-        _tart.exists["clawbox-1"] = True
+        _tart.exists["clawbox-91"] = True
 
     def fake_launch(
         vm_number,
@@ -302,12 +302,12 @@ def test_up_first_run_uses_headless_then_gui(isolated_paths, monkeypatch):
         tart,
     ):
         calls.append(f"launch:headless={str(headless).lower()}")
-        tart.running["clawbox-1"] = True
+        tart.running["clawbox-91"] = True
 
     def fake_provision(opts, _tart):
         calls.append("provision")
         marker = orchestrator.ProvisionMarker(
-            vm_name="clawbox-1",
+            vm_name="clawbox-91",
             profile=opts.profile,
             playwright=opts.enable_playwright,
             tailscale=opts.enable_tailscale,
@@ -315,7 +315,7 @@ def test_up_first_run_uses_headless_then_gui(isolated_paths, monkeypatch):
             signal_payload=opts.enable_signal_payload,
             provisioned_at="2026-01-01T00:00:00Z",
         )
-        marker.write(orchestrator.STATE_DIR / "clawbox-1.provisioned")
+        marker.write(orchestrator.STATE_DIR / "clawbox-91.provisioned")
 
     monkeypatch.setattr(orchestrator, "_acquire_locks", lambda *args, **kwargs: None)
     monkeypatch.setattr(orchestrator, "create_vm", fake_create)
@@ -326,7 +326,7 @@ def test_up_first_run_uses_headless_then_gui(isolated_paths, monkeypatch):
     out = capture_stdout(
         lambda: orchestrator.up(
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 openclaw_source="",
                 openclaw_payload="",
@@ -339,8 +339,8 @@ def test_up_first_run_uses_headless_then_gui(isolated_paths, monkeypatch):
         )
     )
 
-    assert calls == ["create:1", "launch:headless=true", "provision", "launch:headless=false"]
-    assert "Clawbox is ready: clawbox-1" in out
+    assert calls == ["create:91", "launch:headless=true", "provision", "launch:headless=false"]
+    assert "Clawbox is ready: clawbox-91" in out
     assert "VM window may appear before host<->VM sync is ready." not in out
     assert "Wait for 'Clawbox is ready:' before logging in or editing synced files." not in out
 
@@ -352,7 +352,7 @@ def test_up_first_run_developer_includes_sync_readiness_note(isolated_paths, mon
 
     def fake_create(vm_number, _tart):
         calls.append(f"create:{vm_number}")
-        _tart.exists["clawbox-1"] = True
+        _tart.exists["clawbox-91"] = True
 
     def fake_launch(
         vm_number,
@@ -364,12 +364,12 @@ def test_up_first_run_developer_includes_sync_readiness_note(isolated_paths, mon
         tart,
     ):
         calls.append(f"launch:headless={str(headless).lower()}")
-        tart.running["clawbox-1"] = True
+        tart.running["clawbox-91"] = True
 
     def fake_provision(opts, _tart):
         calls.append("provision")
         marker = orchestrator.ProvisionMarker(
-            vm_name="clawbox-1",
+            vm_name="clawbox-91",
             profile=opts.profile,
             playwright=opts.enable_playwright,
             tailscale=opts.enable_tailscale,
@@ -378,7 +378,7 @@ def test_up_first_run_developer_includes_sync_readiness_note(isolated_paths, mon
             provisioned_at="2026-01-01T00:00:00Z",
             sync_backend="mutagen",
         )
-        marker.write(orchestrator.STATE_DIR / "clawbox-1.provisioned")
+        marker.write(orchestrator.STATE_DIR / "clawbox-91.provisioned")
 
     monkeypatch.setattr(orchestrator, "_acquire_locks", lambda *args, **kwargs: None)
     monkeypatch.setattr(orchestrator, "_preflight_developer_mounts", lambda *args, **kwargs: None)
@@ -390,7 +390,7 @@ def test_up_first_run_developer_includes_sync_readiness_note(isolated_paths, mon
     out = capture_stdout(
         lambda: orchestrator.up(
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="developer",
                 openclaw_source=str(isolated_paths),
                 openclaw_payload=str(isolated_paths),
@@ -403,15 +403,15 @@ def test_up_first_run_developer_includes_sync_readiness_note(isolated_paths, mon
         )
     )
 
-    assert calls == ["create:1", "launch:headless=true", "provision", "launch:headless=false"]
-    assert "Clawbox is ready: clawbox-1" in out
+    assert calls == ["create:91", "launch:headless=true", "provision", "launch:headless=false"]
+    assert "Clawbox is ready: clawbox-91" in out
     assert "VM window may appear before host<->VM sync is ready." in out
     assert "Wait for 'Clawbox is ready:' before logging in or editing synced files." in out
 
 
 def test_up_marker_match_skips_provision(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     orchestrator.ensure_secrets_file(create_if_missing=True)
@@ -429,7 +429,7 @@ def test_up_marker_match_skips_provision(isolated_paths, monkeypatch):
     out = capture_stdout(
         lambda: orchestrator.up(
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 openclaw_source="",
                 openclaw_payload="",
@@ -441,13 +441,13 @@ def test_up_marker_match_skips_provision(isolated_paths, monkeypatch):
             tart,
         )
     )
-    assert "Provision marker found for 'clawbox-1'; skipping provisioning." in out
-    assert "Clawbox is running: clawbox-1 (provisioning skipped)" in out
+    assert "Provision marker found for 'clawbox-91'; skipping provisioning." in out
+    assert "Clawbox is running: clawbox-91 (provisioning skipped)" in out
 
 
 def test_up_marker_match_running_vm_does_not_reacquire_locks(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     orchestrator.ensure_secrets_file(create_if_missing=True)
@@ -470,7 +470,7 @@ def test_up_marker_match_running_vm_does_not_reacquire_locks(isolated_paths, mon
     out = capture_stdout(
         lambda: orchestrator.up(
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 openclaw_source="",
                 openclaw_payload="",
@@ -482,12 +482,12 @@ def test_up_marker_match_running_vm_does_not_reacquire_locks(isolated_paths, mon
             tart,
         )
     )
-    assert "Clawbox is running: clawbox-1 (provisioning skipped)" in out
+    assert "Clawbox is running: clawbox-91 (provisioning skipped)" in out
 
 
 def test_recreate_runs_down_delete_then_up(isolated_paths, monkeypatch):
     tart = FakeTart()
-    tart.exists["clawbox-3"] = True
+    tart.exists["clawbox-93"] = True
     calls: list[str] = []
 
     monkeypatch.setattr(
@@ -511,7 +511,7 @@ def test_recreate_runs_down_delete_then_up(isolated_paths, monkeypatch):
     out = capture_stdout(
         lambda: orchestrator.recreate(
             UpOptions(
-                vm_number=3,
+                vm_number=93,
                 profile="developer",
                 openclaw_source=str(isolated_paths),
                 openclaw_payload=str(isolated_paths),
@@ -524,8 +524,8 @@ def test_recreate_runs_down_delete_then_up(isolated_paths, monkeypatch):
         )
     )
 
-    assert "Clean recreate requested for 'clawbox-3'." in out
-    assert calls == ["down:3", "delete:3", "up:3:developer:true"]
+    assert "Clean recreate requested for 'clawbox-93'." in out
+    assert calls == ["down:93", "delete:93", "up:93:developer:true"]
 
 
 def test_recreate_missing_vm_runs_delete_then_up(isolated_paths, monkeypatch):
@@ -550,7 +550,7 @@ def test_recreate_missing_vm_runs_delete_then_up(isolated_paths, monkeypatch):
 
     orchestrator.recreate(
         UpOptions(
-            vm_number=4,
+            vm_number=94,
             profile="standard",
             openclaw_source="",
             openclaw_payload="",
@@ -562,12 +562,12 @@ def test_recreate_missing_vm_runs_delete_then_up(isolated_paths, monkeypatch):
         tart,
     )
 
-    assert calls == ["delete:4", "up:4:standard"]
+    assert calls == ["delete:94", "up:94:standard"]
 
 
 def test_up_missing_marker_on_existing_vm_requires_recreate(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     orchestrator.ensure_secrets_file(create_if_missing=True)
@@ -576,7 +576,7 @@ def test_up_missing_marker_on_existing_vm_requires_recreate(isolated_paths, monk
     with pytest.raises(UserFacingError, match="Provision marker is missing for existing VM"):
         orchestrator.up(
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 openclaw_source="",
                 openclaw_payload="",
@@ -591,7 +591,7 @@ def test_up_missing_marker_on_existing_vm_requires_recreate(isolated_paths, monk
 
 def test_up_marker_mismatch_requires_recreate(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     orchestrator.ensure_secrets_file(create_if_missing=True)
@@ -610,7 +610,7 @@ def test_up_marker_mismatch_requires_recreate(isolated_paths, monkeypatch):
     with pytest.raises(UserFacingError, match="Requested options do not match"):
         orchestrator.up(
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="developer",
                 openclaw_source=str(isolated_paths),
                 openclaw_payload=str(isolated_paths),
@@ -625,7 +625,7 @@ def test_up_marker_mismatch_requires_recreate(isolated_paths, monkeypatch):
 
 def test_up_developer_marker_missing_sync_backend_requires_recreate(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     orchestrator.ensure_secrets_file(create_if_missing=True)
@@ -644,7 +644,7 @@ def test_up_developer_marker_missing_sync_backend_requires_recreate(isolated_pat
     with pytest.raises(UserFacingError, match="legacy provision marker format"):
         orchestrator.up(
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="developer",
                 openclaw_source=str(isolated_paths),
                 openclaw_payload=str(isolated_paths),
@@ -659,8 +659,8 @@ def test_up_developer_marker_missing_sync_backend_requires_recreate(isolated_pat
 
 def test_provision_standard_accepts_optional_flags(isolated_paths, monkeypatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
-    tart.running["clawbox-1"] = True
+    tart.exists["clawbox-91"] = True
+    tart.running["clawbox-91"] = True
     orchestrator.ensure_secrets_file(create_if_missing=True)
     monkeypatch.setattr(orchestrator, "_resolve_vm_ip", lambda *args, **kwargs: "192.168.64.10")
     seen_playbook_cmd: list[str] = []
@@ -673,7 +673,7 @@ def test_provision_standard_accepts_optional_flags(isolated_paths, monkeypatch):
     monkeypatch.setattr(orchestrator.subprocess, "run", fake_run)
     orchestrator.provision_vm(
         ProvisionOptions(
-            vm_number=1,
+            vm_number=91,
             profile="standard",
             enable_playwright=True,
             enable_tailscale=True,
@@ -689,7 +689,7 @@ def test_provision_standard_accepts_optional_flags(isolated_paths, monkeypatch):
 
 def test_provision_developer_writes_sync_backend_mutagen(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     marker_file = orchestrator.STATE_DIR / f"{vm_name}.provisioned"
@@ -705,7 +705,7 @@ def test_provision_developer_writes_sync_backend_mutagen(isolated_paths, monkeyp
 
     orchestrator.provision_vm(
         ProvisionOptions(
-            vm_number=1,
+            vm_number=91,
             profile="developer",
             enable_playwright=False,
             enable_tailscale=False,
@@ -721,7 +721,7 @@ def test_provision_developer_writes_sync_backend_mutagen(isolated_paths, monkeyp
 
 def test_provision_developer_activates_sync_from_locks_by_default(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     orchestrator.ensure_secrets_file(create_if_missing=True)
@@ -741,7 +741,7 @@ def test_provision_developer_activates_sync_from_locks_by_default(isolated_paths
 
     orchestrator.provision_vm(
         ProvisionOptions(
-            vm_number=1,
+            vm_number=91,
             profile="developer",
             enable_playwright=False,
             enable_tailscale=False,
@@ -756,7 +756,7 @@ def test_provision_developer_activates_sync_from_locks_by_default(isolated_paths
 
 def test_provision_developer_can_skip_sync_reactivation(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     orchestrator.ensure_secrets_file(create_if_missing=True)
@@ -776,7 +776,7 @@ def test_provision_developer_can_skip_sync_reactivation(isolated_paths, monkeypa
 
     orchestrator.provision_vm(
         ProvisionOptions(
-            vm_number=1,
+            vm_number=91,
             profile="developer",
             enable_playwright=False,
             enable_tailscale=False,
@@ -793,7 +793,7 @@ def test_up_signal_payload_requires_explicit_signal_cli_flag(isolated_paths):
     with pytest.raises(UserFacingError, match="--signal-cli-payload requires --add-signal-cli-provisioning"):
         orchestrator.up(
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="developer",
                 openclaw_source=str(isolated_paths),
                 openclaw_payload=str(isolated_paths),
@@ -813,7 +813,7 @@ def test_provision_signal_payload_requires_explicit_signal_cli_flag(isolated_pat
     ):
         orchestrator.provision_vm(
             ProvisionOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="developer",
                 enable_playwright=False,
                 enable_tailscale=False,
@@ -826,8 +826,8 @@ def test_provision_signal_payload_requires_explicit_signal_cli_flag(isolated_pat
 
 def test_provision_vm_surfaces_playbook_failure(isolated_paths, monkeypatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
-    tart.running["clawbox-1"] = True
+    tart.exists["clawbox-91"] = True
+    tart.running["clawbox-91"] = True
     orchestrator.ensure_secrets_file(create_if_missing=True)
     monkeypatch.setattr(orchestrator, "_resolve_vm_ip", lambda *args, **kwargs: "192.168.64.10")
     seen_playbook_cmd: list[str] = []
@@ -842,7 +842,7 @@ def test_provision_vm_surfaces_playbook_failure(isolated_paths, monkeypatch):
     with pytest.raises(UserFacingError, match="Provisioning failed"):
         orchestrator.provision_vm(
             ProvisionOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 enable_playwright=False,
                 enable_tailscale=False,
@@ -875,16 +875,16 @@ def test_preflight_signal_payload_marker_times_out(isolated_paths, monkeypatch):
 
     with pytest.raises(UserFacingError, match="signal-cli payload marker was not visible"):
         orchestrator._preflight_signal_payload_marker(
-            "clawbox-1",
-            vm_number=1,
+            "clawbox-91",
+            vm_number=91,
             timeout_seconds=2,
         )
 
 
 def test_provision_vm_developer_signal_payload_runs_marker_preflight(isolated_paths, monkeypatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
-    tart.running["clawbox-1"] = True
+    tart.exists["clawbox-91"] = True
+    tart.running["clawbox-91"] = True
     orchestrator.ensure_secrets_file(create_if_missing=True)
     called: list[dict[str, object]] = []
     playbook_calls: list[list[str]] = []
@@ -905,7 +905,7 @@ def test_provision_vm_developer_signal_payload_runs_marker_preflight(isolated_pa
 
     orchestrator.provision_vm(
         ProvisionOptions(
-            vm_number=1,
+            vm_number=91,
             profile="developer",
             enable_playwright=False,
             enable_tailscale=False,
@@ -917,8 +917,8 @@ def test_provision_vm_developer_signal_payload_runs_marker_preflight(isolated_pa
 
     assert called == [
         {
-            "vm_name": "clawbox-1",
-            "vm_number": 1,
+            "vm_name": "clawbox-91",
+            "vm_number": 91,
             "timeout_seconds": 120,
             "inventory_path": "192.168.64.10,",
             "target_host": "192.168.64.10",
@@ -929,7 +929,7 @@ def test_provision_vm_developer_signal_payload_runs_marker_preflight(isolated_pa
     assert "-i" in playbook_cmd
     inventory_index = playbook_cmd.index("-i")
     assert playbook_cmd[inventory_index + 1] == "192.168.64.10,"
-    assert "vm_number=1" in playbook_cmd
+    assert "vm_number=91" in playbook_cmd
 
 
 def test_provision_vm_fails_when_vm_missing(isolated_paths):
@@ -939,7 +939,7 @@ def test_provision_vm_fails_when_vm_missing(isolated_paths):
     with pytest.raises(UserFacingError, match="does not exist"):
         orchestrator.provision_vm(
             ProvisionOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 enable_playwright=False,
                 enable_tailscale=False,
@@ -952,14 +952,14 @@ def test_provision_vm_fails_when_vm_missing(isolated_paths):
 
 def test_provision_vm_fails_when_vm_not_running(isolated_paths):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
-    tart.running["clawbox-1"] = False
+    tart.exists["clawbox-91"] = True
+    tart.running["clawbox-91"] = False
     orchestrator.ensure_secrets_file(create_if_missing=True)
 
     with pytest.raises(UserFacingError, match="is not running"):
         orchestrator.provision_vm(
             ProvisionOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 enable_playwright=False,
                 enable_tailscale=False,
@@ -975,7 +975,7 @@ def test_up_developer_runs_mount_preflight(isolated_paths, monkeypatch):
     called: list[dict[str, object]] = []
 
     def fake_create(vm_number, _tart):
-        _tart.exists["clawbox-1"] = True
+        _tart.exists["clawbox-91"] = True
 
     def fake_launch(
         vm_number,
@@ -986,11 +986,11 @@ def test_up_developer_runs_mount_preflight(isolated_paths, monkeypatch):
         headless,
         tart,
     ):
-        tart.running["clawbox-1"] = True
+        tart.running["clawbox-91"] = True
 
     def fake_provision(opts, _tart):
         marker = orchestrator.ProvisionMarker(
-            vm_name="clawbox-1",
+            vm_name="clawbox-91",
             profile=opts.profile,
             playwright=opts.enable_playwright,
             tailscale=opts.enable_tailscale,
@@ -998,7 +998,7 @@ def test_up_developer_runs_mount_preflight(isolated_paths, monkeypatch):
             signal_payload=opts.enable_signal_payload,
             provisioned_at="2026-01-01T00:00:00Z",
         )
-        marker.write(orchestrator.STATE_DIR / "clawbox-1.provisioned")
+        marker.write(orchestrator.STATE_DIR / "clawbox-91.provisioned")
 
     monkeypatch.setattr(orchestrator, "_acquire_locks", lambda *args, **kwargs: None)
     monkeypatch.setattr(orchestrator, "create_vm", fake_create)
@@ -1013,7 +1013,7 @@ def test_up_developer_runs_mount_preflight(isolated_paths, monkeypatch):
 
     orchestrator.up(
         UpOptions(
-            vm_number=1,
+            vm_number=91,
             profile="developer",
             openclaw_source=str(isolated_paths),
             openclaw_payload=str(isolated_paths),
@@ -1027,8 +1027,8 @@ def test_up_developer_runs_mount_preflight(isolated_paths, monkeypatch):
 
     assert called == [
         {
-            "vm_name": "clawbox-1",
-            "vm_number": 1,
+            "vm_name": "clawbox-91",
+            "vm_number": 91,
             "openclaw_payload_host": str(isolated_paths),
             "signal_payload_host": "",
             "include_signal_payload": False,
@@ -1050,8 +1050,8 @@ def test_preflight_developer_mounts_cleans_probe_files_on_error(tmp_path: Path, 
 
     with pytest.raises(RuntimeError, match="probe failed"):
         orchestrator._preflight_developer_mounts(
-            "clawbox-1",
-            vm_number=1,
+            "clawbox-91",
+            vm_number=91,
             openclaw_payload_host=str(payload_dir),
             signal_payload_host=str(signal_dir),
             include_signal_payload=True,
@@ -1066,15 +1066,15 @@ def test_resolve_vm_ip_times_out(monkeypatch):
     tart = FakeTart()
     tart.ip = lambda vm_name: None  # type: ignore[method-assign]
     monkeypatch.setattr(orchestrator.time, "sleep", lambda *args, **kwargs: None)
-    with pytest.raises(UserFacingError, match="Timed out waiting for 'clawbox-1' to report an IP address"):
-        orchestrator._resolve_vm_ip(tart, "clawbox-1", timeout_seconds=1)
+    with pytest.raises(UserFacingError, match="Timed out waiting for 'clawbox-91' to report an IP address"):
+        orchestrator._resolve_vm_ip(tart, "clawbox-91", timeout_seconds=1)
 
 
 def test_openclaw_source_lock_conflict_and_reclaim(tmp_path: Path):
     tart = FakeTart()
     path = tmp_path / "shared-source"
-    vm1 = "clawbox-1"
-    vm2 = "clawbox-2"
+    vm1 = "clawbox-91"
+    vm2 = "clawbox-92"
     tart.running[vm1] = True
 
     old_home = os.environ.get("HOME")
@@ -1083,7 +1083,7 @@ def test_openclaw_source_lock_conflict_and_reclaim(tmp_path: Path):
         Path(os.environ["HOME"]).mkdir(parents=True, exist_ok=True)
 
         acquire_path_lock(OPENCLAW_SOURCE_LOCK, vm1, str(path), tart)
-        with pytest.raises(LockError, match="already in use by running VM 'clawbox-1'"):
+        with pytest.raises(LockError, match="already in use by running VM 'clawbox-91'"):
             acquire_path_lock(OPENCLAW_SOURCE_LOCK, vm2, str(path), tart)
 
         tart.running[vm1] = False
@@ -1092,7 +1092,7 @@ def test_openclaw_source_lock_conflict_and_reclaim(tmp_path: Path):
         lock_root = Path(os.environ["HOME"]) / ".clawbox" / "locks" / OPENCLAW_SOURCE_LOCK.lock_kind
         owner_vm_files = list(lock_root.rglob("owner_vm"))
         assert owner_vm_files
-        assert "clawbox-2" in owner_vm_files[0].read_text(encoding="utf-8")
+        assert "clawbox-92" in owner_vm_files[0].read_text(encoding="utf-8")
     finally:
         if old_home is None:
             os.environ.pop("HOME", None)
@@ -1103,7 +1103,7 @@ def test_openclaw_source_lock_conflict_and_reclaim(tmp_path: Path):
 def test_openclaw_source_lock_reclaims_corrupt_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
     path = tmp_path / "shared-source"
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     home = tmp_path / "home"
     old_home = os.environ.get("HOME")
     try:
@@ -1133,7 +1133,7 @@ def test_openclaw_source_lock_prunes_previous_lock_for_same_vm(
     tart = FakeTart()
     path_one = tmp_path / "shared-source-1"
     path_two = tmp_path / "shared-source-2"
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     home = tmp_path / "home"
     old_home = os.environ.get("HOME")
     try:
@@ -1160,22 +1160,22 @@ def test_openclaw_source_lock_prunes_previous_lock_for_same_vm(
 
 def test_down_vm_stops_running_and_cleans_locks(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     cleaned: list[str] = []
     monkeypatch.setattr(orchestrator, "cleanup_locks_for_vm", lambda name: cleaned.append(name))
 
-    out = capture_stdout(lambda: orchestrator.down_vm(1, tart))
+    out = capture_stdout(lambda: orchestrator.down_vm(91, tart))
 
     assert vm_name in tart.stop_calls
     assert cleaned == [vm_name]
-    assert "VM 'clawbox-1' stopped." in out
+    assert "VM 'clawbox-91' stopped." in out
 
 
 def test_delete_vm_removes_vm_marker_and_locks(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     marker_file = orchestrator.STATE_DIR / f"{vm_name}.provisioned"
     marker_file.parent.mkdir(parents=True, exist_ok=True)
     marker_file.write_text("profile: standard\n", encoding="utf-8")
@@ -1184,33 +1184,33 @@ def test_delete_vm_removes_vm_marker_and_locks(isolated_paths, monkeypatch):
     cleaned: list[str] = []
     monkeypatch.setattr(orchestrator, "cleanup_locks_for_vm", lambda name: cleaned.append(name))
 
-    out = capture_stdout(lambda: orchestrator.delete_vm(1, tart))
+    out = capture_stdout(lambda: orchestrator.delete_vm(91, tart))
 
     assert vm_name in tart.stop_calls
     assert vm_name in tart.delete_calls
     assert not marker_file.exists()
     assert cleaned == [vm_name]
-    assert "Deleted VM: clawbox-1" in out
+    assert "Deleted VM: clawbox-91" in out
 
 
 def test_ip_vm_prints_resolved_ip(isolated_paths):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
 
-    out = capture_stdout(lambda: orchestrator.ip_vm(1, tart))
+    out = capture_stdout(lambda: orchestrator.ip_vm(91, tart))
     assert out.strip() == "192.168.64.10"
 
 
 def test_ip_vm_fails_when_vm_not_running(isolated_paths):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = False
 
     with pytest.raises(UserFacingError, match="is not running"):
-        orchestrator.ip_vm(1, tart)
+        orchestrator.ip_vm(91, tart)
 
 
 def test_parse_mount_statuses_handles_wrapped_output():
@@ -1220,7 +1220,7 @@ def test_parse_mount_statuses_handles_wrapped_output():
     ]
     stdout = "\n".join(
         [
-            "clawbox-2 | CHANGED | rc=0 >>",
+            "clawbox-92 | CHANGED | rc=0 >>",
             "\t/Users/Shared/clawbox-sync/openclaw-source=mounted",
             "prefix text /Users/Shared/clawbox-sync/openclaw-payload=dir suffix text",
         ]
@@ -1233,7 +1233,7 @@ def test_parse_mount_statuses_handles_wrapped_output():
 
 def test_status_vm_reports_mounts_without_signal_daemon_probe(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     marker = orchestrator.ProvisionMarker(
@@ -1261,8 +1261,13 @@ def test_status_vm_reports_mounts_without_signal_daemon_probe(isolated_paths, mo
         return responses.pop(0)
 
     monkeypatch.setattr(status_ops, "_ansible_shell", fake_ansible_shell)
+    monkeypatch.setattr(
+        status_ops,
+        "_probe_mutagen_sync",
+        lambda _vm_name: ("ok", True, ["Name: clawbox-clawbox-91-openclaw-source", "Status: Watching for changes"]),
+    )
 
-    out = capture_stdout(lambda: orchestrator.status_vm(1, tart))
+    out = capture_stdout(lambda: orchestrator.status_vm(91, tart))
     assert "sync paths:" in out
     assert f"{orchestrator.SIGNAL_PAYLOAD_MOUNT}: dir" in out
     assert "signal payload sync daemon:" not in out
@@ -1270,7 +1275,7 @@ def test_status_vm_reports_mounts_without_signal_daemon_probe(isolated_paths, mo
 
 def test_status_vm_json_reports_mounts_without_signal_daemon_probe(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     marker = orchestrator.ProvisionMarker(
@@ -1298,8 +1303,13 @@ def test_status_vm_json_reports_mounts_without_signal_daemon_probe(isolated_path
         return responses.pop(0)
 
     monkeypatch.setattr(status_ops, "_ansible_shell", fake_ansible_shell)
+    monkeypatch.setattr(
+        status_ops,
+        "_probe_mutagen_sync",
+        lambda _vm_name: ("ok", True, ["Name: clawbox-clawbox-91-openclaw-source", "Status: Watching for changes"]),
+    )
 
-    out = capture_stdout(lambda: orchestrator.status_vm(1, tart, as_json=True))
+    out = capture_stdout(lambda: orchestrator.status_vm(91, tart, as_json=True))
     parsed = json.loads(out)
     assert parsed["vm"] == vm_name
     assert parsed["exists"] is True
@@ -1315,7 +1325,7 @@ def test_status_vm_json_reports_mounts_without_signal_daemon_probe(isolated_path
 
 def test_status_vm_skips_remote_probe_when_marker_missing(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     orchestrator.SECRETS_FILE.write_text("not_vm_password: nope\n", encoding="utf-8")
@@ -1328,7 +1338,7 @@ def test_status_vm_skips_remote_probe_when_marker_missing(isolated_paths, monkey
         or subprocess.CompletedProcess(args=["ansible"], returncode=0, stdout="", stderr=""),
     )
 
-    out = capture_stdout(lambda: orchestrator.status_vm(1, tart))
+    out = capture_stdout(lambda: orchestrator.status_vm(91, tart))
     assert probes["count"] == 0
     assert "note: no marker found; skipping remote sync-path probe" in out
     assert "warnings:" not in out
@@ -1336,7 +1346,7 @@ def test_status_vm_skips_remote_probe_when_marker_missing(isolated_paths, monkey
 
 def test_status_vm_json_skips_remote_probe_when_marker_missing(isolated_paths, monkeypatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     orchestrator.SECRETS_FILE.write_text("not_vm_password: nope\n", encoding="utf-8")
@@ -1349,7 +1359,7 @@ def test_status_vm_json_skips_remote_probe_when_marker_missing(isolated_paths, m
         or subprocess.CompletedProcess(args=["ansible"], returncode=0, stdout="", stderr=""),
     )
 
-    out = capture_stdout(lambda: orchestrator.status_vm(1, tart, as_json=True))
+    out = capture_stdout(lambda: orchestrator.status_vm(91, tart, as_json=True))
     parsed = json.loads(out)
     assert probes["count"] == 0
     assert parsed["sync_paths"]["probe"] == "not_applicable"

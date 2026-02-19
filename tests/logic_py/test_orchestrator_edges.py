@@ -126,7 +126,7 @@ def test_signal_payload_host_marker_maps_oserror(tmp_path: Path, monkeypatch: py
 
     monkeypatch.setattr(Path, "write_text", raise_oserror)
     with pytest.raises(UserFacingError, match="Could not write signal payload marker file"):
-        orchestrator._ensure_signal_payload_host_marker(str(marker_dir), "clawbox-1")
+        orchestrator._ensure_signal_payload_host_marker(str(marker_dir), "clawbox-91")
 
 
 def test_acquire_locks_maps_lock_error(monkeypatch: pytest.MonkeyPatch):
@@ -137,12 +137,12 @@ def test_acquire_locks_maps_lock_error(monkeypatch: pytest.MonkeyPatch):
         lambda *_args, **_kwargs: (_ for _ in ()).throw(LockError("lock held")),
     )
     with pytest.raises(UserFacingError, match="lock held"):
-        orchestrator._acquire_locks(tart, "clawbox-1", "/src", "", "")
+        orchestrator._acquire_locks(tart, "clawbox-91", "/src", "", "")
 
 
 def test_launch_vm_maps_tart_launch_error(isolated_paths, monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
+    tart.exists["clawbox-91"] = True
     monkeypatch.setattr(orchestrator, "_acquire_locks", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         tart,
@@ -151,7 +151,7 @@ def test_launch_vm_maps_tart_launch_error(isolated_paths, monkeypatch: pytest.Mo
     )
     with pytest.raises(UserFacingError, match="Failed to launch VM"):
         orchestrator.launch_vm(
-            vm_number=1,
+            vm_number=91,
             profile="standard",
             openclaw_source="",
             openclaw_payload="",
@@ -163,7 +163,7 @@ def test_launch_vm_maps_tart_launch_error(isolated_paths, monkeypatch: pytest.Mo
 
 def test_launch_vm_running_vm_starts_watcher(isolated_paths, monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     watcher: dict[str, object] = {}
@@ -176,7 +176,7 @@ def test_launch_vm_running_vm_starts_watcher(isolated_paths, monkeypatch: pytest
 
     out = _capture_stdout(
         lambda: orchestrator.launch_vm(
-            vm_number=1,
+            vm_number=91,
             profile="standard",
             openclaw_source="",
             openclaw_payload="",
@@ -193,7 +193,7 @@ def test_launch_vm_developer_without_marker_uses_bootstrap_auth_mode(
     isolated_paths, monkeypatch: pytest.MonkeyPatch
 ):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     seen_auth_modes: list[str] = []
@@ -206,7 +206,7 @@ def test_launch_vm_developer_without_marker_uses_bootstrap_auth_mode(
     )
 
     orchestrator.launch_vm(
-        vm_number=1,
+        vm_number=91,
         profile="developer",
         openclaw_source=str(isolated_paths),
         openclaw_payload=str(isolated_paths),
@@ -221,7 +221,7 @@ def test_launch_vm_developer_with_marker_uses_vm_user_auth_mode(
     isolated_paths, monkeypatch: pytest.MonkeyPatch
 ):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     seen_auth_modes: list[str] = []
@@ -237,7 +237,7 @@ def test_launch_vm_developer_with_marker_uses_vm_user_auth_mode(
     )
 
     orchestrator.launch_vm(
-        vm_number=1,
+        vm_number=91,
         profile="developer",
         openclaw_source=str(isolated_paths),
         openclaw_payload=str(isolated_paths),
@@ -250,12 +250,12 @@ def test_launch_vm_developer_with_marker_uses_vm_user_auth_mode(
 
 def test_resolve_vm_ip_returns_when_available():
     tart = FakeTart()
-    tart.ip_map["clawbox-1"] = "192.168.64.55"
-    assert orchestrator._resolve_vm_ip(tart, "clawbox-1", 1) == "192.168.64.55"
+    tart.ip_map["clawbox-91"] = "192.168.64.55"
+    assert orchestrator._resolve_vm_ip(tart, "clawbox-91", 1) == "192.168.64.55"
 
 
 def test_resolve_mutagen_auth_uses_vm_user_only(monkeypatch: pytest.MonkeyPatch):
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     vm_ip = "192.168.64.10"
     attempted_users: list[str] = []
 
@@ -296,12 +296,12 @@ def test_resolve_mutagen_auth_uses_vm_user_only(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(orchestrator, "_ansible_shell", fake_ansible_shell)
 
     resolved = orchestrator._resolve_mutagen_auth(vm_name, vm_ip, auth_mode="vm_user")
-    assert resolved == ("clawbox-1", "dev-pass")
+    assert resolved == ("clawbox-91", "dev-pass")
     assert attempted_users == [vm_name]
 
 
 def test_resolve_mutagen_auth_raises_after_vm_user_auth_fails(monkeypatch: pytest.MonkeyPatch):
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     vm_ip = "192.168.64.10"
     attempted_users: list[str] = []
 
@@ -337,7 +337,7 @@ def test_resolve_mutagen_auth_raises_after_vm_user_auth_fails(monkeypatch: pytes
     with pytest.raises(UserFacingError) as exc_info:
         orchestrator._resolve_mutagen_auth(vm_name, vm_ip, auth_mode="vm_user")
     assert "Could not establish guest SSH credentials for Mutagen sync setup" in str(exc_info.value)
-    assert "attempted user: clawbox-1" in str(exc_info.value)
+    assert "attempted user: clawbox-91" in str(exc_info.value)
     assert "dev auth failed" in str(exc_info.value)
     assert attempted_users == [vm_name]
 
@@ -372,7 +372,7 @@ def test_resolve_mutagen_auth_uses_bootstrap_admin_when_requested(
     monkeypatch.setattr(orchestrator, "_ansible_shell", fake_ansible_shell)
 
     resolved = orchestrator._resolve_mutagen_auth(
-        "clawbox-1",
+        "clawbox-91",
         vm_ip,
         auth_mode="bootstrap_admin",
     )
@@ -382,12 +382,12 @@ def test_resolve_mutagen_auth_uses_bootstrap_admin_when_requested(
 
 def test_ensure_mutagen_keypair_returns_existing_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(orchestrator, "STATE_DIR", tmp_path / ".clawbox" / "state")
-    key_path = orchestrator._mutagen_key_path("clawbox-1")
+    key_path = orchestrator._mutagen_key_path("clawbox-91")
     key_path.parent.mkdir(parents=True, exist_ok=True)
     key_path.write_text("private", encoding="utf-8")
     key_path.with_suffix(".pub").write_text("public", encoding="utf-8")
 
-    resolved = orchestrator._ensure_mutagen_keypair("clawbox-1")
+    resolved = orchestrator._ensure_mutagen_keypair("clawbox-91")
     assert resolved == key_path
 
 
@@ -401,7 +401,7 @@ def test_ensure_mutagen_keypair_maps_generation_errors(
         lambda *_args, **_kwargs: (_ for _ in ()).throw(FileNotFoundError("missing ssh-keygen")),
     )
     with pytest.raises(UserFacingError, match="Command not found: ssh-keygen"):
-        orchestrator._ensure_mutagen_keypair("clawbox-1")
+        orchestrator._ensure_mutagen_keypair("clawbox-91")
 
     monkeypatch.setattr(
         orchestrator.subprocess,
@@ -411,7 +411,7 @@ def test_ensure_mutagen_keypair_maps_generation_errors(
         ),
     )
     with pytest.raises(UserFacingError, match="Could not generate Mutagen SSH key"):
-        orchestrator._ensure_mutagen_keypair("clawbox-1")
+        orchestrator._ensure_mutagen_keypair("clawbox-91")
 
 
 def test_ensure_remote_mutagen_authorized_key_success_and_failure(
@@ -431,9 +431,9 @@ def test_ensure_remote_mutagen_authorized_key_success_and_failure(
     )
 
     orchestrator._ensure_remote_mutagen_authorized_key(
-        "clawbox-1",
+        "clawbox-91",
         "192.168.64.10",
-        ansible_user="clawbox-1",
+        ansible_user="clawbox-91",
         ansible_password="pw",
     )
     assert seen_cmds
@@ -448,9 +448,9 @@ def test_ensure_remote_mutagen_authorized_key_success_and_failure(
     )
     with pytest.raises(UserFacingError, match="Could not install Mutagen SSH key"):
         orchestrator._ensure_remote_mutagen_authorized_key(
-            "clawbox-1",
+            "clawbox-91",
             "192.168.64.10",
-            ansible_user="clawbox-1",
+            ansible_user="clawbox-91",
             ansible_password="pw",
         )
 
@@ -478,7 +478,7 @@ def test_prepare_remote_mutagen_targets_maps_failure(monkeypatch: pytest.MonkeyP
     orchestrator._prepare_remote_mutagen_targets(
         "192.168.64.10",
         specs,
-        ansible_user="clawbox-1",
+        ansible_user="clawbox-91",
         ansible_password="pw",
     )
     assert seen_cmds
@@ -495,7 +495,7 @@ def test_prepare_remote_mutagen_targets_maps_failure(monkeypatch: pytest.MonkeyP
         orchestrator._prepare_remote_mutagen_targets(
             "192.168.64.10",
             specs,
-            ansible_user="clawbox-1",
+            ansible_user="clawbox-91",
             ansible_password="pw",
         )
 
@@ -506,12 +506,12 @@ def test_activate_mutagen_sync_requires_running_vm(tmp_path: Path, monkeypatch: 
     source.mkdir(parents=True, exist_ok=True)
     payload.mkdir(parents=True, exist_ok=True)
     tart = FakeTart()
-    tart.running["clawbox-1"] = False
+    tart.running["clawbox-91"] = False
     monkeypatch.setattr(orchestrator, "mutagen_available", lambda: True)
 
     with pytest.raises(UserFacingError, match="must be running before activating Mutagen sync"):
         orchestrator._activate_mutagen_sync(
-            vm_name="clawbox-1",
+            vm_name="clawbox-91",
             openclaw_source=str(source),
             openclaw_payload=str(payload),
             signal_payload="",
@@ -527,13 +527,13 @@ def test_activate_mutagen_sync_success_flow(tmp_path: Path, monkeypatch: pytest.
     payload.mkdir(parents=True, exist_ok=True)
 
     tart = FakeTart()
-    tart.running["clawbox-1"] = True
+    tart.running["clawbox-91"] = True
     monkeypatch.setattr(orchestrator, "mutagen_available", lambda: True)
     monkeypatch.setattr(orchestrator, "_resolve_vm_ip", lambda *_args, **_kwargs: "192.168.64.10")
     monkeypatch.setattr(
         orchestrator,
         "_resolve_mutagen_auth",
-        lambda *_args, **_kwargs: ("clawbox-1", "pw"),
+        lambda *_args, **_kwargs: ("clawbox-91", "pw"),
     )
     monkeypatch.setattr(orchestrator, "_ensure_remote_mutagen_authorized_key", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(orchestrator, "_ensure_mutagen_keypair", lambda _vm_name: tmp_path / "id_ed25519")
@@ -541,7 +541,7 @@ def test_activate_mutagen_sync_success_flow(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr(
         orchestrator,
         "ensure_mutagen_ssh_alias",
-        lambda *_args, **_kwargs: "clawbox-mutagen-clawbox-1",
+        lambda *_args, **_kwargs: "clawbox-mutagen-clawbox-91",
     )
     monkeypatch.setattr(orchestrator, "ensure_vm_sessions", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -554,7 +554,7 @@ def test_activate_mutagen_sync_success_flow(tmp_path: Path, monkeypatch: pytest.
 
     out = _capture_stdout(
         lambda: orchestrator._activate_mutagen_sync(
-            vm_name="clawbox-1",
+            vm_name="clawbox-91",
             openclaw_source=str(source),
             openclaw_payload=str(payload),
             signal_payload="",
@@ -565,7 +565,7 @@ def test_activate_mutagen_sync_success_flow(tmp_path: Path, monkeypatch: pytest.
     assert "Preparing Mutagen sync..." in out
     assert "optional sync paths still warming up (continuing):" in out
     assert "Mutagen sync active (bidirectional):" in out
-    assert marked == ["clawbox-1"]
+    assert marked == ["clawbox-91"]
 
 
 def test_activate_mutagen_sync_from_locks_requires_source_and_payload(
@@ -581,7 +581,7 @@ def test_activate_mutagen_sync_from_locks_requires_source_and_payload(
         },
     )
     with pytest.raises(UserFacingError, match="Could not determine developer source/payload host paths"):
-        orchestrator._activate_mutagen_sync_from_locks("clawbox-1", FakeTart())
+        orchestrator._activate_mutagen_sync_from_locks("clawbox-91", FakeTart())
 
 
 def test_activate_mutagen_sync_from_locks_forwards_expected_values(
@@ -599,8 +599,8 @@ def test_activate_mutagen_sync_from_locks_forwards_expected_values(
     seen: dict[str, object] = {}
     monkeypatch.setattr(orchestrator, "_activate_mutagen_sync", lambda **kwargs: seen.update(kwargs))
 
-    orchestrator._activate_mutagen_sync_from_locks("clawbox-1", FakeTart())
-    assert seen["vm_name"] == "clawbox-1"
+    orchestrator._activate_mutagen_sync_from_locks("clawbox-91", FakeTart())
+    assert seen["vm_name"] == "clawbox-91"
     assert seen["openclaw_source"] == "/tmp/source"
     assert seen["openclaw_payload"] == "/tmp/payload"
     assert seen["signal_payload"] == "/tmp/signal"
@@ -614,12 +614,12 @@ def test_deactivate_mutagen_sync_maps_mutagen_error(monkeypatch: pytest.MonkeyPa
         lambda *_args, **_kwargs: (_ for _ in ()).throw(orchestrator.MutagenError("mutagen bad")),
     )
     with pytest.raises(UserFacingError, match="mutagen bad"):
-        orchestrator._deactivate_mutagen_sync("clawbox-1", flush=False)
+        orchestrator._deactivate_mutagen_sync("clawbox-91", flush=False)
 
 
 def test_build_sync_specs_ignores_node_modules_and_dist_for_source() -> None:
     specs = orchestrator._build_sync_specs(
-        "clawbox-1",
+        "clawbox-91",
         {
             orchestrator.OPENCLAW_SOURCE_LOCK: "/tmp/source",
             orchestrator.OPENCLAW_PAYLOAD_LOCK: "/tmp/payload",
@@ -636,7 +636,7 @@ def test_build_sync_specs_ignores_node_modules_and_dist_for_source() -> None:
 
 def test_build_sync_specs_requires_signal_ready_when_configured() -> None:
     specs = orchestrator._build_sync_specs(
-        "clawbox-1",
+        "clawbox-91",
         {
             orchestrator.OPENCLAW_SOURCE_LOCK: "/tmp/source",
             orchestrator.OPENCLAW_PAYLOAD_LOCK: "/tmp/payload",
@@ -684,7 +684,7 @@ def test_wait_for_mutagen_sync_ready_success_cleans_markers(
     optional_missing = orchestrator._wait_for_mutagen_sync_ready(
         "192.168.64.10",
         specs,
-        ansible_user="clawbox-1",
+        ansible_user="clawbox-91",
         ansible_password="clawbox",
         timeout_seconds=2,
     )
@@ -724,7 +724,7 @@ def test_wait_for_mutagen_sync_ready_timeout_cleans_markers(
         orchestrator._wait_for_mutagen_sync_ready(
             "192.168.64.10",
             specs,
-            ansible_user="clawbox-1",
+            ansible_user="clawbox-91",
             ansible_password="clawbox",
             timeout_seconds=2,
         )
@@ -767,14 +767,14 @@ def test_wait_for_mutagen_sync_ready_timeout_includes_mutagen_diagnostics(
         orchestrator._wait_for_mutagen_sync_ready(
             "192.168.64.10",
             specs,
-            vm_name="clawbox-1",
-            ansible_user="clawbox-1",
+            vm_name="clawbox-91",
+            ansible_user="clawbox-91",
             ansible_password="clawbox",
             timeout_seconds=2,
         )
     msg = str(exc_info.value)
     assert "mutagen session diagnostics" in msg
-    assert "mutagen status for clawbox-1" in msg
+    assert "mutagen status for clawbox-91" in msg
 
 
 def test_wait_for_mutagen_sync_ready_allows_optional_missing(
@@ -821,7 +821,7 @@ def test_wait_for_mutagen_sync_ready_allows_optional_missing(
     optional_missing = orchestrator._wait_for_mutagen_sync_ready(
         "192.168.64.10",
         specs,
-        ansible_user="clawbox-1",
+        ansible_user="clawbox-91",
         ansible_password="clawbox",
         timeout_seconds=2,
     )
@@ -842,8 +842,8 @@ def test_preflight_developer_mounts_success(isolated_paths, monkeypatch: pytest.
     monkeypatch.setattr(orchestrator, "_wait_for_remote_probe", fake_wait)
     out = _capture_stdout(
         lambda: orchestrator._preflight_developer_mounts(
-            "clawbox-1",
-            vm_number=1,
+            "clawbox-91",
+            vm_number=91,
             openclaw_payload_host=str(payload_dir),
             signal_payload_host="",
             include_signal_payload=False,
@@ -875,8 +875,8 @@ def test_preflight_developer_mounts_failure_contains_diagnostics(
     )
     with pytest.raises(UserFacingError, match="Required synced developer paths failed preflight checks"):
         orchestrator._preflight_developer_mounts(
-            "clawbox-1",
-            vm_number=1,
+            "clawbox-91",
+            vm_number=91,
             openclaw_payload_host=str(payload_dir),
             signal_payload_host="",
             include_signal_payload=False,
@@ -893,8 +893,8 @@ def test_preflight_signal_payload_marker_success(monkeypatch: pytest.MonkeyPatch
     )
     out = _capture_stdout(
         lambda: orchestrator._preflight_signal_payload_marker(
-            "clawbox-1",
-            vm_number=1,
+            "clawbox-91",
+            vm_number=91,
             timeout_seconds=3,
             inventory_path="192.168.64.1,",
             target_host="192.168.64.1",
@@ -905,7 +905,7 @@ def test_preflight_signal_payload_marker_success(monkeypatch: pytest.MonkeyPatch
 
 def test_provision_vm_maps_missing_ansible_playbook(isolated_paths, monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    vm_name = "clawbox-1"
+    vm_name = "clawbox-91"
     tart.exists[vm_name] = True
     tart.running[vm_name] = True
     tart.ip_map[vm_name] = "192.168.64.10"
@@ -919,7 +919,7 @@ def test_provision_vm_maps_missing_ansible_playbook(isolated_paths, monkeypatch:
     with pytest.raises(UserFacingError, match="Command not found: ansible-playbook"):
         orchestrator.provision_vm(
             ProvisionOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 enable_playwright=False,
                 enable_tailscale=False,
@@ -937,15 +937,17 @@ def test_stop_vm_and_wait_timeout(monkeypatch: pytest.MonkeyPatch):
             self.running[vm_name] = True
 
     tart = NeverStops()
-    tart.running["clawbox-1"] = True
+    tart.running["clawbox-91"] = True
+    monkeypatch.setattr(orchestrator, "_deactivate_mutagen_sync", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(orchestrator.time, "sleep", lambda *_args, **_kwargs: None)
-    assert orchestrator._stop_vm_and_wait(tart, "clawbox-1", timeout_seconds=2) is False
+    assert orchestrator._stop_vm_and_wait(tart, "clawbox-91", timeout_seconds=2) is False
 
 
 def test_stop_vm_and_wait_stops_watcher(monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    tart.running["clawbox-1"] = True
+    tart.running["clawbox-91"] = True
     stopped: list[str] = []
+    monkeypatch.setattr(orchestrator, "_deactivate_mutagen_sync", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         orchestrator,
         "stop_vm_watcher",
@@ -953,14 +955,14 @@ def test_stop_vm_and_wait_stops_watcher(monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(orchestrator.time, "sleep", lambda *_args, **_kwargs: None)
 
-    assert orchestrator._stop_vm_and_wait(tart, "clawbox-1", timeout_seconds=2) is True
-    assert stopped == ["clawbox-1"]
+    assert orchestrator._stop_vm_and_wait(tart, "clawbox-91", timeout_seconds=2) is True
+    assert stopped == ["clawbox-91"]
 
 
 def test_render_up_command_includes_optional_flags():
     cmd = orchestrator._render_up_command(
         UpOptions(
-            vm_number=2,
+            vm_number=92,
             profile="developer",
             openclaw_source="/src",
             openclaw_payload="/payload",
@@ -978,7 +980,7 @@ def test_render_up_command_includes_optional_flags():
 
 def test_compute_up_provision_reason_created_vm():
     opts = UpOptions(
-        vm_number=1,
+        vm_number=91,
         profile="standard",
         openclaw_source="",
         openclaw_payload="",
@@ -992,11 +994,11 @@ def test_compute_up_provision_reason_created_vm():
 
 
 def test_compute_up_provision_reason_parse_failure(isolated_paths):
-    marker_file = orchestrator.STATE_DIR / "clawbox-1.provisioned"
+    marker_file = orchestrator.STATE_DIR / "clawbox-91.provisioned"
     marker_file.parent.mkdir(parents=True, exist_ok=True)
     marker_file.write_text("bad content\n", encoding="utf-8")
     opts = UpOptions(
-        vm_number=1,
+        vm_number=91,
         profile="standard",
         openclaw_source="",
         openclaw_payload="",
@@ -1015,9 +1017,9 @@ def test_ensure_vm_running_for_up_timeout(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(orchestrator, "wait_for_vm_running", lambda *_args, **_kwargs: False)
     with pytest.raises(UserFacingError, match="did not transition to running state"):
         orchestrator._ensure_vm_running_for_up(
-            "clawbox-1",
+            "clawbox-91",
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 openclaw_source="",
                 openclaw_payload="",
@@ -1033,13 +1035,13 @@ def test_ensure_vm_running_for_up_timeout(monkeypatch: pytest.MonkeyPatch):
 
 def test_relaunch_gui_after_headless_provision_stop_timeout(monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    tart.running["clawbox-1"] = True
+    tart.running["clawbox-91"] = True
     monkeypatch.setattr(orchestrator, "_stop_vm_and_wait", lambda *_args, **_kwargs: False)
     with pytest.raises(UserFacingError, match="Timed out stopping headless VM"):
         orchestrator._relaunch_gui_after_headless_provision(
-            "clawbox-1",
+            "clawbox-91",
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 openclaw_source="",
                 openclaw_payload="",
@@ -1055,15 +1057,15 @@ def test_relaunch_gui_after_headless_provision_stop_timeout(monkeypatch: pytest.
 
 def test_relaunch_gui_after_headless_provision_relaunch_timeout(monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    tart.running["clawbox-1"] = True
+    tart.running["clawbox-91"] = True
     monkeypatch.setattr(orchestrator, "_stop_vm_and_wait", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(orchestrator, "launch_vm", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(orchestrator, "wait_for_vm_running", lambda *_args, **_kwargs: False)
     with pytest.raises(UserFacingError, match="after GUI relaunch"):
         orchestrator._relaunch_gui_after_headless_provision(
-            "clawbox-1",
+            "clawbox-91",
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 openclaw_source="",
                 openclaw_payload="",
@@ -1088,9 +1090,9 @@ def test_ensure_running_after_provision_launches(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(orchestrator, "wait_for_vm_running", fake_wait)
     monkeypatch.setattr(orchestrator, "launch_vm", lambda *_args, **_kwargs: calls.update(launch=1))
     orchestrator._ensure_running_after_provision_if_needed(
-        "clawbox-1",
+        "clawbox-91",
         UpOptions(
-            vm_number=1,
+            vm_number=91,
             profile="standard",
             openclaw_source="",
             openclaw_payload="",
@@ -1112,7 +1114,7 @@ def test_up_errors_when_vm_missing_after_create(isolated_paths, monkeypatch: pyt
     with pytest.raises(UserFacingError, match="was not found after create_vm completed"):
         orchestrator.up(
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 openclaw_source="",
                 openclaw_payload="",
@@ -1127,7 +1129,7 @@ def test_up_errors_when_vm_missing_after_create(isolated_paths, monkeypatch: pyt
 
 def test_up_errors_when_not_running_after_orchestration(isolated_paths, monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
+    tart.exists["clawbox-91"] = True
     monkeypatch.setattr(orchestrator, "ensure_secrets_file", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(orchestrator, "_compute_up_provision_reason", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(orchestrator, "_ensure_vm_running_for_up", lambda *_args, **_kwargs: False)
@@ -1135,7 +1137,7 @@ def test_up_errors_when_not_running_after_orchestration(isolated_paths, monkeypa
     with pytest.raises(UserFacingError, match="is not running after orchestration"):
         orchestrator.up(
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="standard",
                 openclaw_source="",
                 openclaw_payload="",
@@ -1150,12 +1152,12 @@ def test_up_errors_when_not_running_after_orchestration(isolated_paths, monkeypa
 
 def test_up_mutagen_activates_sync(isolated_paths, monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
-    tart.running["clawbox-1"] = True
-    marker = orchestrator.STATE_DIR / "clawbox-1.provisioned"
+    tart.exists["clawbox-91"] = True
+    tart.running["clawbox-91"] = True
+    marker = orchestrator.STATE_DIR / "clawbox-91.provisioned"
     marker.parent.mkdir(parents=True, exist_ok=True)
     orchestrator.ProvisionMarker(
-        vm_name="clawbox-1",
+        vm_name="clawbox-91",
         profile="developer",
         playwright=False,
         tailscale=False,
@@ -1178,7 +1180,7 @@ def test_up_mutagen_activates_sync(isolated_paths, monkeypatch: pytest.MonkeyPat
     out = _capture_stdout(
         lambda: orchestrator.up(
             UpOptions(
-                vm_number=1,
+                vm_number=91,
                 profile="developer",
                 openclaw_source=str(isolated_paths),
                 openclaw_payload=str(isolated_paths),
@@ -1190,79 +1192,83 @@ def test_up_mutagen_activates_sync(isolated_paths, monkeypatch: pytest.MonkeyPat
             tart,
         )
     )
-    assert activated == ["clawbox-1"]
-    assert "Clawbox is running: clawbox-1 (provisioning skipped)" in out
+    assert activated == ["clawbox-91"]
+    assert "Clawbox is running: clawbox-91 (provisioning skipped)" in out
 
 
 def test_wait_for_vm_absent_timeout(monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
+    tart.exists["clawbox-91"] = True
     monkeypatch.setattr(orchestrator.time, "sleep", lambda *_args, **_kwargs: None)
-    assert orchestrator._wait_for_vm_absent(tart, "clawbox-1", timeout_seconds=2) is False
+    assert orchestrator._wait_for_vm_absent(tart, "clawbox-91", timeout_seconds=2) is False
 
 
 def test_down_vm_nonexistent_cleans_locks(isolated_paths, monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
     cleaned: list[str] = []
     monkeypatch.setattr(orchestrator, "cleanup_locks_for_vm", lambda vm_name: cleaned.append(vm_name))
-    out = _capture_stdout(lambda: orchestrator.down_vm(1, tart))
+    out = _capture_stdout(lambda: orchestrator.down_vm(91, tart))
     assert "does not exist" in out
-    assert cleaned == ["clawbox-1"]
+    assert cleaned == ["clawbox-91"]
 
 
 def test_down_vm_timeout_raises(monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
-    tart.running["clawbox-1"] = True
+    tart.exists["clawbox-91"] = True
+    tart.running["clawbox-91"] = True
+    monkeypatch.setattr(orchestrator, "_deactivate_mutagen_sync", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(orchestrator, "_stop_vm_and_wait", lambda *_args, **_kwargs: False)
-    with pytest.raises(UserFacingError, match="Timed out waiting for VM 'clawbox-1' to stop"):
-        orchestrator.down_vm(1, tart)
+    with pytest.raises(UserFacingError, match="Timed out waiting for VM 'clawbox-91' to stop"):
+        orchestrator.down_vm(91, tart)
 
 
 def test_down_vm_already_stopped_message(monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
-    tart.running["clawbox-1"] = False
+    tart.exists["clawbox-91"] = True
+    tart.running["clawbox-91"] = False
+    monkeypatch.setattr(orchestrator, "_deactivate_mutagen_sync", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(orchestrator, "cleanup_locks_for_vm", lambda *_args, **_kwargs: None)
-    out = _capture_stdout(lambda: orchestrator.down_vm(1, tart))
+    out = _capture_stdout(lambda: orchestrator.down_vm(91, tart))
     assert "already stopped" in out
 
 
 def test_delete_vm_nonexistent_cleans_state(isolated_paths, monkeypatch: pytest.MonkeyPatch):
-    marker = orchestrator.STATE_DIR / "clawbox-1.provisioned"
+    marker = orchestrator.STATE_DIR / "clawbox-91.provisioned"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text("profile: standard\n", encoding="utf-8")
     tart = FakeTart()
     cleaned: list[str] = []
     monkeypatch.setattr(orchestrator, "cleanup_locks_for_vm", lambda vm_name: cleaned.append(vm_name))
-    out = _capture_stdout(lambda: orchestrator.delete_vm(1, tart))
+    out = _capture_stdout(lambda: orchestrator.delete_vm(91, tart))
     assert "does not exist" in out
     assert not marker.exists()
-    assert cleaned == ["clawbox-1"]
+    assert cleaned == ["clawbox-91"]
 
 
 def test_delete_vm_timeout_before_delete(monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
-    tart.running["clawbox-1"] = True
+    tart.exists["clawbox-91"] = True
+    tart.running["clawbox-91"] = True
+    monkeypatch.setattr(orchestrator, "_deactivate_mutagen_sync", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(orchestrator, "_stop_vm_and_wait", lambda *_args, **_kwargs: False)
-    with pytest.raises(UserFacingError, match="Timed out waiting for VM 'clawbox-1' to stop before deletion"):
-        orchestrator.delete_vm(1, tart)
+    with pytest.raises(UserFacingError, match="Timed out waiting for VM 'clawbox-91' to stop before deletion"):
+        orchestrator.delete_vm(91, tart)
 
 
 def test_delete_vm_still_exists_after_delete(monkeypatch: pytest.MonkeyPatch):
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
-    tart.running["clawbox-1"] = False
+    tart.exists["clawbox-91"] = True
+    tart.running["clawbox-91"] = False
+    monkeypatch.setattr(orchestrator, "_deactivate_mutagen_sync", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(orchestrator, "_wait_for_vm_absent", lambda *_args, **_kwargs: False)
     with pytest.raises(UserFacingError, match="still exists after delete attempt"):
-        orchestrator.delete_vm(1, tart)
+        orchestrator.delete_vm(91, tart)
 
 
 def test_ip_vm_errors_when_ip_unavailable():
     tart = FakeTart()
-    tart.exists["clawbox-1"] = True
-    tart.running["clawbox-1"] = True
-    tart.ip_map["clawbox-1"] = None
+    tart.exists["clawbox-91"] = True
+    tart.running["clawbox-91"] = True
+    tart.ip_map["clawbox-91"] = None
     with pytest.raises(UserFacingError, match="Could not resolve IP"):
-        orchestrator.ip_vm(1, tart)
+        orchestrator.ip_vm(91, tart)

@@ -1,0 +1,21 @@
+--------------------------------------------------------------------------------
+Name: clawbox-clawbox-91-openclaw-source
+Identifier: sync_123456
+Labels:
+	clawbox.kind: openclaw-source
+	clawbox.managed: true
+	clawbox.vm: clawbox-91
+Status: Watching for changes
+Alpha:
+	URL: /Users/joshavant/Developer/openclaw
+Beta:
+	URL: clawbox-mutagen-clawbox-91:/Users/Shared/clawbox-sync/openclaw-source
+--------------------------------------------------------------------------------
+Name: clawbox-clawbox-91-openclaw-payload
+Identifier: sync_789000
+Labels:
+	clawbox.kind: openclaw-payload
+	clawbox.managed: true
+	clawbox.vm: clawbox-91
+Status: Watching for changes
+--------------------------------------------------------------------------------

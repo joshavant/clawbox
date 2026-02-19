@@ -78,14 +78,14 @@ def test_vm_exists_and_running(monkeypatch: pytest.MonkeyPatch):
         client,
         "list_vms_json",
         lambda: [
-            {"Name": "clawbox-1", "Running": True},
-            {"Name": "clawbox-2", "Running": False},
+            {"Name": "clawbox-91", "Running": True},
+            {"Name": "clawbox-92", "Running": False},
         ],
     )
-    assert client.vm_exists("clawbox-1") is True
-    assert client.vm_exists("clawbox-9") is False
-    assert client.vm_running("clawbox-1") is True
-    assert client.vm_running("clawbox-2") is False
+    assert client.vm_exists("clawbox-91") is True
+    assert client.vm_exists("clawbox-99") is False
+    assert client.vm_running("clawbox-91") is True
+    assert client.vm_running("clawbox-92") is False
 
 
 def test_ip_uses_agent_then_default(monkeypatch: pytest.MonkeyPatch):
@@ -99,15 +99,15 @@ def test_ip_uses_agent_then_default(monkeypatch: pytest.MonkeyPatch):
         return _cp(args=args, rc=0, stdout="192.168.64.22\n")
 
     monkeypatch.setattr(client, "_run", fake_run)
-    assert client.ip("clawbox-1") == "192.168.64.22"
-    assert calls[0] == ["tart", "ip", "--resolver=agent", "clawbox-1"]
-    assert calls[1] == ["tart", "ip", "clawbox-1"]
+    assert client.ip("clawbox-91") == "192.168.64.22"
+    assert calls[0] == ["tart", "ip", "--resolver=agent", "clawbox-91"]
+    assert calls[1] == ["tart", "ip", "clawbox-91"]
 
 
 def test_ip_returns_none_when_all_resolvers_fail(monkeypatch: pytest.MonkeyPatch):
     client = TartClient()
     monkeypatch.setattr(client, "_run", lambda *args, **kwargs: _cp(args=["tart"], rc=1, stdout=""))
-    assert client.ip("clawbox-1") is None
+    assert client.ip("clawbox-91") is None
 
 
 def test_run_in_background_starts_tart(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -117,11 +117,11 @@ def test_run_in_background_starts_tart(monkeypatch: pytest.MonkeyPatch, tmp_path
         pid = 4242
 
     def fake_popen(args, **kwargs):
-        assert args[:3] == ["tart", "run", "clawbox-1"]
+        assert args[:3] == ["tart", "run", "clawbox-91"]
         return Proc()
 
     monkeypatch.setattr(tart_mod.subprocess, "Popen", fake_popen)
-    proc = client.run_in_background("clawbox-1", ["--no-graphics"], tmp_path / "launch.log")
+    proc = client.run_in_background("clawbox-91", ["--no-graphics"], tmp_path / "launch.log")
     assert proc.pid == 4242
 
 
@@ -133,7 +133,7 @@ def test_run_in_background_maps_errors(monkeypatch: pytest.MonkeyPatch, tmp_path
 
     monkeypatch.setattr(tart_mod.subprocess, "Popen", raise_not_found)
     with pytest.raises(TartError, match="Command not found: tart"):
-        client.run_in_background("clawbox-1", [], tmp_path / "launch.log")
+        client.run_in_background("clawbox-91", [], tmp_path / "launch.log")
 
 
 def test_wait_for_vm_running_success_and_timeout(monkeypatch: pytest.MonkeyPatch):
@@ -147,10 +147,10 @@ def test_wait_for_vm_running_success_and_timeout(monkeypatch: pytest.MonkeyPatch
 
     tart = FakeTart()
     monkeypatch.setattr(tart_mod.time, "sleep", lambda *_args, **_kwargs: None)
-    assert wait_for_vm_running(tart, "clawbox-1", timeout_seconds=3, poll_seconds=1) is True
+    assert wait_for_vm_running(tart, "clawbox-91", timeout_seconds=3, poll_seconds=1) is True
 
     class AlwaysOffTart:
         def vm_running(self, _vm_name: str) -> bool:
             return False
 
-    assert wait_for_vm_running(AlwaysOffTart(), "clawbox-1", timeout_seconds=1, poll_seconds=1) is False
+    assert wait_for_vm_running(AlwaysOffTart(), "clawbox-91", timeout_seconds=1, poll_seconds=1) is False

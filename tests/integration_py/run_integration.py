@@ -362,6 +362,76 @@ class IntegrationRunner:
             return
         self.fail(f"Assertion failed on '{vm_name}': command '{' '.join(args)}'")
 
+    def read_status_text(self, vm_number: int) -> str:
+        status_output = self.run_cmd(
+            self.clawbox_cmd("status", str(vm_number)),
+            capture_output=True,
+        ).stdout
+        if status_output:
+            print(status_output, end="")
+        return status_output
+
+    def read_status_json(self, vm_number: int) -> dict[str, object]:
+        status_json_output = self.run_cmd(
+            self.clawbox_cmd("status", str(vm_number), "--json"),
+            capture_output=True,
+        ).stdout
+        return json.loads(status_json_output)
+
+    def assert_mutagen_status(self, vm_number: int, *, active: bool) -> None:
+        status_output = self.read_status_text(vm_number)
+        expected_state = "active" if active else "inactive"
+        if f"mutagen sync: {expected_state}" not in status_output:
+            self.fail(
+                "Assertion failed: expected Mutagen sync state in status output\n"
+                f"  expected: mutagen sync: {expected_state}\n"
+                f"----- output -----\n{status_output}"
+            )
+        if active and "no active sessions found" in status_output:
+            self.fail("Assertion failed: did not expect missing Mutagen sessions in status output")
+        if not active and "no active sessions found" not in status_output:
+            self.fail("Assertion failed: expected no-active-sessions summary in status output")
+
+        status_data = self.read_status_json(vm_number)
+        mutagen_sync = status_data.get("mutagen_sync", {})
+        if not isinstance(mutagen_sync, dict):
+            self.fail("Assertion failed: expected mutagen_sync object in status --json")
+        if mutagen_sync.get("enabled") is not True:
+            self.fail("Assertion failed: expected mutagen_sync.enabled=true in status --json")
+        if mutagen_sync.get("probe") != "ok":
+            self.fail("Assertion failed: expected mutagen_sync.probe=ok in status --json")
+        if mutagen_sync.get("active") is not active:
+            self.fail(
+                "Assertion failed: unexpected mutagen_sync.active in status --json\n"
+                f"  expected: {active}\n"
+                f"  actual: {mutagen_sync.get('active')}"
+            )
+        lines = mutagen_sync.get("lines")
+        if not isinstance(lines, list):
+            self.fail("Assertion failed: expected mutagen_sync.lines list in status --json")
+        has_no_sessions = any("no active sessions found" in str(line) for line in lines)
+        if active and has_no_sessions:
+            self.fail("Assertion failed: did not expect no-active-sessions mutagen summary in status --json")
+        if not active and not has_no_sessions:
+            self.fail("Assertion failed: expected no-active-sessions mutagen summary in status --json")
+
+    def mutagen_status_matches(self, vm_number: int, *, active: bool) -> bool:
+        status_data = self.read_status_json(vm_number)
+        mutagen_sync = status_data.get("mutagen_sync", {})
+        if not isinstance(mutagen_sync, dict):
+            return False
+        if mutagen_sync.get("enabled") is not True:
+            return False
+        if mutagen_sync.get("probe") != "ok":
+            return False
+        if mutagen_sync.get("active") is not active:
+            return False
+        lines = mutagen_sync.get("lines")
+        if not isinstance(lines, list):
+            return False
+        has_no_sessions = any("no active sessions found" in str(line) for line in lines)
+        return has_no_sessions is (not active)
+
     def create_openclaw_fixture(self) -> None:
         (self.fixture_source_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (self.fixture_source_dir / "tools" / "tsdown-mock").mkdir(parents=True, exist_ok=True)
@@ -865,22 +935,14 @@ class IntegrationRunner:
         if "synced developer paths verified." not in up_output:
             self.fail("Assertion failed: expected developer sync preflight verification output")
 
-        status_output = self.run_cmd(
-            self.clawbox_cmd("status", str(self.config.developer_vm_number)),
-            capture_output=True,
-        ).stdout
-        if status_output:
-            print(status_output, end="")
+        status_output = self.read_status_text(self.config.developer_vm_number)
         if "sync paths:" not in status_output:
             self.fail("Assertion failed: expected sync paths section in developer status output")
         if "signal-cli-payload" not in status_output:
             self.fail("Assertion failed: expected signal payload sync path in developer status output")
+        self.assert_mutagen_status(self.config.developer_vm_number, active=True)
 
-        status_json_output = self.run_cmd(
-            self.clawbox_cmd("status", str(self.config.developer_vm_number), "--json"),
-            capture_output=True,
-        ).stdout
-        status_data = json.loads(status_json_output)
+        status_data = self.read_status_json(self.config.developer_vm_number)
         if "sync_paths" not in status_data:
             self.fail("Assertion failed: expected sync_paths object in developer status --json")
         if status_data.get("signal_payload_sync", {}).get("enabled") is not True:
@@ -996,6 +1058,8 @@ class IntegrationRunner:
         status_data = json.loads(status_json_output)
         if status_data.get("signal_payload_sync", {}).get("enabled") is not False:
             self.fail("Assertion failed: expected signal_payload_sync.enabled=false in status --json")
+        if status_data.get("mutagen_sync", {}).get("enabled") is not False:
+            self.fail("Assertion failed: expected mutagen_sync.enabled=false in optional status --json")
 
         print(f"  verifying post-provisioning checks on {self.optional_vm_name}...")
         self.assert_vm_running(self.optional_vm_name)
@@ -1013,6 +1077,57 @@ class IntegrationRunner:
             f"test -L '/Users/{self.optional_vm_name}/Desktop/Tailscale.app'",
         )
         self.assert_remote_command(self.optional_vm_name, "signal-cli", "--version")
+
+    def run_mutagen_contract_flow(self) -> None:
+        print(f"==> integration: mutagen status contract ({self.developer_vm_name})")
+        self.cleanup_vm(self.developer_vm_name)
+        marker = self.marker_path(self.developer_vm_name)
+        marker.unlink(missing_ok=True)
+
+        up_result = self.run_cmd(
+            self.clawbox_cmd(
+                "up",
+                "--developer",
+                "--number",
+                str(self.config.developer_vm_number),
+                "--openclaw-source",
+                str(self.fixture_source_dir),
+                "--openclaw-payload",
+                str(self.fixture_payload_dir),
+            ),
+            check=False,
+            capture_output=True,
+        )
+        up_output = f"{up_result.stdout}\n{up_result.stderr}"
+        if up_output:
+            print(up_output, end="")
+        if up_result.returncode != 0:
+            self.fail(
+                "Assertion failed: expected mutagen-contract developer up to succeed\n"
+                f"----- output -----\n{up_output}"
+            )
+
+        self.assert_vm_running(self.developer_vm_name)
+        self.assert_file_contains(marker, "profile: developer")
+        self.assert_file_contains(marker, "sync_backend: mutagen")
+        self.assert_mutagen_status(self.config.developer_vm_number, active=True)
+
+        selector = f"clawbox.vm={self.developer_vm_name}"
+        self.run_cmd(
+            ["mutagen", "sync", "terminate", "--label-selector", selector],
+            check=False,
+            capture_output=True,
+        )
+        self.assert_eventually(
+            lambda: self.mutagen_status_matches(self.config.developer_vm_number, active=False),
+            timeout_seconds=45,
+            poll_seconds=2,
+            failure_message=(
+                "Assertion failed: developer status did not report inactive/no-sessions Mutagen state "
+                "after terminating sessions"
+            ),
+        )
+        self.assert_mutagen_status(self.config.developer_vm_number, active=False)
 
     def run_status_warning_flow(self) -> None:
         print("==> integration: status warning flow (invalid secrets)")
@@ -1224,6 +1339,13 @@ class IntegrationRunner:
         self.ensure_base_image()
         print(f"==> integration: profile={self.config.profile} exhaustive={self.config.exhaustive}")
 
+        if self.config.profile == "mutagen-contract":
+            self.create_openclaw_fixture()
+            self.run_mutagen_contract_flow()
+            print("==> integration: cleanup")
+            print("Integration checks passed.")
+            return
+
         if self.config.profile == "full":
             self.run_standard_network_preflight_failure_flow()
         else:
@@ -1277,9 +1399,10 @@ def load_config() -> IntegrationConfig:
 
     exhaustive = os.getenv("CLAWBOX_CI_EXHAUSTIVE", "false").strip().lower() == "true"
     profile = os.getenv("CLAWBOX_CI_PROFILE", "full").strip().lower()
-    if profile not in {"smoke", "full"}:
+    if profile not in {"smoke", "full", "mutagen-contract"}:
         raise IntegrationError(
-            f"Error: CLAWBOX_CI_PROFILE must be one of: smoke, full (got: {profile})"
+            "Error: CLAWBOX_CI_PROFILE must be one of: "
+            f"smoke, full, mutagen-contract (got: {profile})"
         )
     keep_failed_artifacts = (
         os.getenv("CLAWBOX_CI_KEEP_FAILURE_ARTIFACTS", "false").strip().lower() == "true"

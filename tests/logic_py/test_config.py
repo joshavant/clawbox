@@ -17,7 +17,7 @@ def test_vm_base_name_reads_group_vars(monkeypatch, tmp_path: Path) -> None:
     _set_group_vars(monkeypatch, group_vars)
 
     assert config.vm_base_name() == "clawtest"
-    assert config.vm_name_for(2) == "clawtest-2"
+    assert config.vm_name_for(92) == "clawtest-92"
 
 
 def test_vm_base_name_falls_back_to_default_on_invalid_value(monkeypatch, tmp_path: Path) -> None:

@@ -19,7 +19,13 @@ def _load_integration_module():
     return module
 
 
-def _integration_config(module, *, standard_vm_number: int = 1, developer_vm_number: int = 2, optional_vm_number: int = 2):
+def _integration_config(
+    module,
+    *,
+    standard_vm_number: int = 91,
+    developer_vm_number: int = 92,
+    optional_vm_number: int = 93,
+):
     return module.IntegrationConfig(
         profile="full",
         standard_vm_number=standard_vm_number,
@@ -113,9 +119,9 @@ def test_keep_failed_artifacts_preserves_state_on_unexpected_exception(monkeypat
 
     config = module.IntegrationConfig(
         profile="full",
-        standard_vm_number=1,
-        developer_vm_number=2,
-        optional_vm_number=2,
+        standard_vm_number=91,
+        developer_vm_number=92,
+        optional_vm_number=92,
         base_image_name="macos-base",
         base_image_remote="ghcr.io/cirruslabs/macos-sequoia-vanilla:latest",
         exhaustive=False,
@@ -152,9 +158,9 @@ def test_unexpected_exception_cleans_up_when_keep_disabled(monkeypatch: pytest.M
 
     config = module.IntegrationConfig(
         profile="full",
-        standard_vm_number=1,
-        developer_vm_number=2,
-        optional_vm_number=2,
+        standard_vm_number=91,
+        developer_vm_number=92,
+        optional_vm_number=92,
         base_image_name="macos-base",
         base_image_remote="ghcr.io/cirruslabs/macos-sequoia-vanilla:latest",
         exhaustive=False,
@@ -303,6 +309,13 @@ def test_load_config_rejects_invalid_profile(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLAWBOX_CI_PROFILE", "invalid")
     with pytest.raises(module.IntegrationError, match="CLAWBOX_CI_PROFILE must be one of"):
         module.load_config()
+
+
+def test_load_config_accepts_mutagen_contract_profile(monkeypatch: pytest.MonkeyPatch):
+    module = _load_integration_module()
+    monkeypatch.setenv("CLAWBOX_CI_PROFILE", "mutagen-contract")
+    config = module.load_config()
+    assert config.profile == "mutagen-contract"
 
 
 def test_standard_network_preflight_failure_flow_sets_fault_injection_env(
