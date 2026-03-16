@@ -47,6 +47,14 @@ def build_ansible_shell_command(
 def build_ansible_env() -> dict[str, str]:
     env = os.environ.copy()
     env["ANSIBLE_HOST_KEY_CHECKING"] = "False"
+    package_import_root = str(Path(__file__).resolve().parents[1])
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    if existing_pythonpath:
+        pythonpath_entries = existing_pythonpath.split(os.pathsep)
+        if package_import_root not in pythonpath_entries:
+            env["PYTHONPATH"] = f"{package_import_root}{os.pathsep}{existing_pythonpath}"
+    else:
+        env["PYTHONPATH"] = package_import_root
     return env
 
 

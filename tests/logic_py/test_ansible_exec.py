@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -44,9 +45,33 @@ def test_build_ansible_shell_command_become_true() -> None:
 
 def test_build_ansible_env_disables_host_key_checking(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EXAMPLE_ENV", "ok")
+    monkeypatch.delenv("PYTHONPATH", raising=False)
     env = ansible_exec.build_ansible_env()
     assert env["EXAMPLE_ENV"] == "ok"
     assert env["ANSIBLE_HOST_KEY_CHECKING"] == "False"
+    assert env["PYTHONPATH"] == str(Path(ansible_exec.__file__).resolve().parents[1])
+
+
+def test_build_ansible_env_prepends_package_root_to_existing_pythonpath(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PYTHONPATH", "/tmp/existing")
+
+    env = ansible_exec.build_ansible_env()
+
+    package_root = str(Path(ansible_exec.__file__).resolve().parents[1])
+    assert env["PYTHONPATH"] == f"{package_root}{os.pathsep}/tmp/existing"
+
+
+def test_build_ansible_env_does_not_duplicate_existing_package_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_root = str(Path(ansible_exec.__file__).resolve().parents[1])
+    monkeypatch.setenv("PYTHONPATH", f"{package_root}{os.pathsep}/tmp/existing")
+
+    env = ansible_exec.build_ansible_env()
+
+    assert env["PYTHONPATH"] == f"{package_root}{os.pathsep}/tmp/existing"
 
 
 def test_run_ansible_shell_runs_with_expected_params(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -81,6 +106,9 @@ def test_run_ansible_shell_runs_with_expected_params(monkeypatch: pytest.MonkeyP
     assert kwargs["text"] is True
     assert kwargs["capture_output"] is True
     assert kwargs["env"]["ANSIBLE_HOST_KEY_CHECKING"] == "False"
+    assert str(Path(ansible_exec.__file__).resolve().parents[1]) in kwargs["env"]["PYTHONPATH"].split(
+        os.pathsep
+    )
 
 
 def test_run_ansible_shell_maps_missing_ansible(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
