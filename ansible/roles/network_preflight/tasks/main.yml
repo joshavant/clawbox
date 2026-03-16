@@ -15,49 +15,186 @@
   changed_when: false
   failed_when: false
 
-- name: Check DNS resolution for Homebrew installer host
+- name: Capture DNS resolution snapshot for Homebrew host
   become_user: "{{ vm_name }}"
-  command: /usr/bin/dscacheutil -q host -a name raw.githubusercontent.com
-  register: network_preflight_dns_resolution_initial
+  shell: |
+    /usr/bin/python3 - <<'PY'
+    import socket
+    import sys
+
+    host = "raw.githubusercontent.com"
+    addresses = set()
+    last_error = ""
+
+    try:
+        addresses = {
+            entry[4][0]
+            for entry in socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+        }
+    except Exception as exc:  # pragma: no cover - shell-probe diagnostics
+        last_error = str(exc)
+
+    if addresses:
+        print("\n".join(sorted(addresses)))
+        sys.exit(0)
+
+    print(last_error)
+    sys.exit(1)
+    PY
+  args:
+    executable: /bin/bash
+  register: network_preflight_dns_resolution
   changed_when: false
   failed_when: false
 
-- name: Re-check DNS resolution for Homebrew installer host
-  become_user: "{{ vm_name }}"
-  command: /usr/bin/dscacheutil -q host -a name raw.githubusercontent.com
-  register: network_preflight_dns_resolution_final
-  changed_when: false
-  failed_when: false
-  when: network_preflight_dns_resolution_initial.rc == 0
-
-- name: Keep DNS probe result when initial check fails
+- name: Mark DNS preflight as failed when host lookup has no answer
   set_fact:
-    network_preflight_dns_resolution_final: "{{ network_preflight_dns_resolution_initial }}"
-  when: network_preflight_dns_resolution_initial.rc != 0
+    network_preflight_dns_failed: >-
+      {{ network_preflight_dns_resolution.rc != 0 or
+         (network_preflight_dns_resolution.stdout | trim | length) == 0 }}
 
-- name: Check HTTPS reachability for Homebrew installer endpoint
-  become_user: "{{ vm_name }}"
-  command: >
-    /usr/bin/curl -fsSLI --connect-timeout 5 --max-time 20
-    https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
-  register: network_preflight_brew_endpoint
+- name: Warn when DNS snapshot indicates resolver is not ready
+  debug:
+    msg: |
+      Network preflight warning: DNS resolver did not return Homebrew host yet.
+        DNS resolution check rc: {{ network_preflight_dns_resolution.rc }}
+      Attempting guest DNS fallback before Homebrew installation.
+      Last DNS probe output:
+        {{ (network_preflight_dns_resolution.stderr | default(network_preflight_dns_resolution.stdout) | default('n/a', true)).strip() }}
+  when: network_preflight_dns_failed
+
+- name: Detect active default-route interface for DNS fallback
+  become: true
+  shell: /sbin/route -n get default | /usr/bin/awk '/interface:/{print $2; exit}'
+  args:
+    executable: /bin/bash
+  register: network_preflight_active_interface
   changed_when: false
   failed_when: false
+  when: >-
+    network_preflight_ip_connectivity.rc == 0 and
+    network_preflight_dns_failed and
+    (clawbox_guest_dns_fallback_enabled | default(true) | bool)
 
-- name: Fail fast when VM internet or DNS prerequisites are missing
+- name: Detect active network service name for DNS fallback
+  become: true
+  shell: >
+    /usr/sbin/networksetup -listnetworkserviceorder |
+    /usr/bin/awk -v dev="{{ network_preflight_active_interface.stdout | trim }}"
+    '/^\([0-9]+\)/ {svc=$0; sub(/^\([0-9]+\) /, "", svc)}
+    /Device:/ {line=$0; sub(/^.*Device: /, "", line); sub(/\).*$/, "", line);
+    if (line == dev) {print svc; exit}}'
+  args:
+    executable: /bin/bash
+  register: network_preflight_active_service
+  changed_when: false
+  failed_when: false
+  when: >-
+    network_preflight_ip_connectivity.rc == 0 and
+    network_preflight_dns_failed and
+    (clawbox_guest_dns_fallback_enabled | default(true) | bool)
+
+- name: Apply DNS fallback servers to active network service
+  become: true
+  shell: >
+    /usr/sbin/networksetup -setdnsservers
+    "{{ network_preflight_active_service.stdout | trim }}"
+    {{ (clawbox_guest_dns_fallback_servers | default(['1.1.1.1', '8.8.8.8'])) | join(' ') }}
+  args:
+    executable: /bin/bash
+  register: network_preflight_dns_fallback_apply
+  changed_when: network_preflight_dns_fallback_apply.rc == 0
+  failed_when: false
+  when: >-
+    network_preflight_ip_connectivity.rc == 0 and
+    network_preflight_dns_failed and
+    (clawbox_guest_dns_fallback_enabled | default(true) | bool) and
+    (network_preflight_active_interface.stdout | trim | length) > 0 and
+    (network_preflight_active_service.stdout | trim | length) > 0
+
+- name: Re-check DNS resolution after fallback
+  become_user: "{{ vm_name }}"
+  shell: |
+    /usr/bin/python3 - <<'PY'
+    import socket
+    import sys
+
+    host = "raw.githubusercontent.com"
+    addresses = set()
+    last_error = ""
+
+    try:
+        addresses = {
+            entry[4][0]
+            for entry in socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+        }
+    except Exception as exc:  # pragma: no cover - shell-probe diagnostics
+        last_error = str(exc)
+
+    if addresses:
+        print("\n".join(sorted(addresses)))
+        sys.exit(0)
+
+    print(last_error)
+    sys.exit(1)
+    PY
+  args:
+    executable: /bin/bash
+  register: network_preflight_dns_resolution_after_fallback
+  changed_when: false
+  failed_when: false
+  when: network_preflight_dns_fallback_apply is defined and network_preflight_dns_fallback_apply.rc == 0
+
+- name: Choose effective DNS probe result
+  set_fact:
+    network_preflight_dns_resolution_effective: >-
+      {{ network_preflight_dns_resolution_after_fallback
+         if (network_preflight_dns_resolution_after_fallback is defined)
+         else network_preflight_dns_resolution }}
+
+- name: Confirm DNS fallback succeeded
+  debug:
+    msg: |
+      DNS fallback applied successfully for provisioning.
+        interface: {{ network_preflight_active_interface.stdout | trim }}
+        service: {{ network_preflight_active_service.stdout | trim }}
+        servers: {{ (clawbox_guest_dns_fallback_servers | default(['1.1.1.1', '8.8.8.8'])) | join(', ') }}
+  when: >-
+    network_preflight_dns_fallback_apply is defined and
+    network_preflight_dns_fallback_apply.rc == 0 and
+    network_preflight_dns_resolution_effective.rc == 0 and
+    (network_preflight_dns_resolution_effective.stdout | trim | length) > 0
+
+- name: Fail fast when VM outbound internet is missing
   fail:
     msg: |
       VM networking preflight failed before Homebrew install.
         IP reachability check rc: {{ network_preflight_ip_connectivity.rc }}
-        DNS resolution check rc: {{ network_preflight_dns_resolution_final.rc }}
-        Homebrew endpoint check rc: {{ network_preflight_brew_endpoint.rc }}
+        DNS resolution check rc: {{ network_preflight_dns_resolution.rc }}
       This VM must have outbound internet access and working DNS for provisioning.
       If macOS Application Firewall is enabled on the host, allow Tart's binary in the firewall allowlist.
       Last DNS probe output:
-        {{ (network_preflight_dns_resolution_final.stderr | default(network_preflight_dns_resolution_final.stdout) | default('n/a')).strip() }}
-      Last endpoint probe output:
-        {{ (network_preflight_brew_endpoint.stderr | default(network_preflight_brew_endpoint.stdout) | default('n/a')).strip() }}
+        {{ (network_preflight_dns_resolution.stderr | default(network_preflight_dns_resolution.stdout) | default('n/a', true)).strip() }}
+      Provisioning is stopped because outbound IP connectivity failed.
   when: >-
-    network_preflight_ip_connectivity.rc != 0 or
-    network_preflight_dns_resolution_final.rc != 0 or
-    network_preflight_brew_endpoint.rc != 0
+    network_preflight_ip_connectivity.rc != 0
+
+- name: Fail fast when DNS remains unavailable after fallback
+  fail:
+    msg: |
+      VM networking preflight failed before Homebrew install.
+        IP reachability check rc: {{ network_preflight_ip_connectivity.rc }}
+        DNS resolution check rc: {{ network_preflight_dns_resolution_effective.rc }}
+      DNS remained unavailable after guest fallback handling.
+      Active interface: {{ network_preflight_active_interface.stdout | default('n/a') | trim }}
+      Active service: {{ network_preflight_active_service.stdout | default('n/a') | trim }}
+      Fallback servers attempted: {{ (clawbox_guest_dns_fallback_servers | default(['1.1.1.1', '8.8.8.8'])) | join(', ') }}
+      Last DNS probe output:
+        {{ (network_preflight_dns_resolution_effective.stderr | default(network_preflight_dns_resolution_effective.stdout) | default('n/a', true)).strip() }}
+      Host remediation:
+        - Restart the VM and retry.
+        - If this persists, restart host vmnet/DHCP services and Tart, then rerun.
+  when: >-
+    network_preflight_ip_connectivity.rc == 0 and
+    (network_preflight_dns_resolution_effective.rc != 0 or
+     (network_preflight_dns_resolution_effective.stdout | trim | length) == 0)

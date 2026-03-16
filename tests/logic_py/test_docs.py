@@ -61,6 +61,11 @@ def test_homebrew_role_fails_fast_when_brew_binary_is_missing_after_install() ->
     role = (PROJECT_DIR / "ansible" / "roles" / "homebrew" / "tasks" / "main.yml").read_text(
         encoding="utf-8"
     )
+    assert "Download Homebrew installer with retry and fallback endpoints" in role
+    assert "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" in role
+    assert "https://github.com/Homebrew/install/raw/HEAD/install.sh" in role
+    assert "clawbox_homebrew_download_max_wait_seconds" in role
+    assert "DNS nameservers from scutil --dns:" in role
     assert "Run Homebrew installer" in role
     assert "Verify Homebrew binary is present" in role
     assert "Fail when Homebrew install did not produce brew binary" in role
@@ -74,12 +79,19 @@ def test_provision_playbook_runs_network_preflight_before_homebrew() -> None:
     assert network_idx < homebrew_idx
 
 
-def test_network_preflight_has_no_guest_dns_mutation_step() -> None:
+def test_network_preflight_has_guest_dns_fallback_step() -> None:
     role = (
         PROJECT_DIR / "ansible" / "roles" / "network_preflight" / "tasks" / "main.yml"
     ).read_text(encoding="utf-8")
     assert "CLAWBOX_TEST_FORCE_NETWORK_PREFLIGHT_FAIL" in role
-    assert "networksetup -setdnsservers" not in role
+    assert "socket.getaddrinfo" in role
+    assert "dscacheutil -q host -a name raw.githubusercontent.com" not in role
+    assert "Attempting guest DNS fallback before Homebrew installation." in role
+    assert "Apply DNS fallback servers to active network service" in role
+    assert "Fail fast when VM outbound internet is missing" in role
+    assert "Fail fast when DNS remains unavailable after fallback" in role
+    assert "Check HTTPS reachability for Homebrew installer endpoint" not in role
+    assert "networksetup -setdnsservers" in role
 
 
 def test_development_plan_references_python_cli_not_legacy_shell_wrappers() -> None:

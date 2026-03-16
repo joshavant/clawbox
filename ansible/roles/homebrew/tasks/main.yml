@@ -4,12 +4,65 @@
     path: /opt/homebrew/bin/brew
   register: brew_check
 
-- name: Install Homebrew
+- name: Download Homebrew installer with retry and fallback endpoints
   become_user: "{{ vm_name }}"
-  get_url:
-    url: https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
-    dest: /tmp/clawbox-homebrew-install.sh
-    mode: "0755"
+  shell: |
+    set -euo pipefail
+    installer="/tmp/clawbox-homebrew-install.sh"
+    deadline=$(( $(date +%s) + {{ clawbox_homebrew_download_max_wait_seconds | int }} ))
+    attempt=1
+    last_error=""
+
+    while [ "$(date +%s)" -lt "${deadline}" ]; do
+      for url in \
+        "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" \
+        "https://github.com/Homebrew/install/raw/HEAD/install.sh"; do
+        if output=$(/usr/bin/curl -fsSL --connect-timeout 5 --max-time 45 "${url}" -o "${installer}" 2>&1); then
+          chmod 0755 "${installer}"
+          echo "Downloaded from: ${url}"
+          exit 0
+        fi
+        last_error="${output}"
+      done
+
+      sleep_seconds=$(( attempt * {{ clawbox_homebrew_download_backoff_step_seconds | int }} ))
+      if [ "${sleep_seconds}" -gt "{{ clawbox_homebrew_download_backoff_max_seconds | int }}" ]; then
+        sleep_seconds="{{ clawbox_homebrew_download_backoff_max_seconds | int }}"
+      fi
+      remaining_seconds=$(( deadline - $(date +%s) ))
+      if [ "${remaining_seconds}" -le 0 ]; then
+        break
+      fi
+      if [ "${sleep_seconds}" -gt "${remaining_seconds}" ]; then
+        sleep_seconds="${remaining_seconds}"
+      fi
+      echo "Homebrew installer download retry ${attempt}; sleeping ${sleep_seconds}s (remaining budget ${remaining_seconds}s)." >&2
+      sleep "${sleep_seconds}"
+      attempt=$((attempt + 1))
+    done
+
+    echo "Unable to download Homebrew installer within retry budget." >&2
+    if [ -n "${last_error}" ]; then
+      echo "Last curl error: ${last_error}" >&2
+    fi
+    echo "DNS nameservers from scutil --dns:" >&2
+    /usr/sbin/scutil --dns | /usr/bin/awk '/nameserver\\[[0-9]+\\]/{print}' >&2 || true
+    echo "Python resolver diagnostic for raw.githubusercontent.com:" >&2
+    /usr/bin/python3 - <<'PY' >&2
+    import socket
+    import sys
+    host = "raw.githubusercontent.com"
+    try:
+      addrs = sorted({entry[4][0] for entry in socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)})
+    except Exception as exc:
+      print(str(exc))
+      sys.exit(0)
+    print("\n".join(addrs) if addrs else "no addresses returned")
+    PY
+    exit 1
+  args:
+    executable: /bin/bash
+  register: homebrew_installer_download
   when: not brew_check.stat.exists
 
 - name: Run Homebrew installer

@@ -15,6 +15,13 @@ clawbox_enable_signal_payload: false
 # OpenClaw install channel
 openclaw_npm_version: latest
 clawbox_brew_env_path: "/opt/homebrew/bin:{{ ansible_facts['env']['PATH'] | default('/usr/bin:/bin:/usr/sbin:/sbin') }}"
+clawbox_homebrew_download_max_wait_seconds: 90
+clawbox_homebrew_download_backoff_step_seconds: 2
+clawbox_homebrew_download_backoff_max_seconds: 12
+clawbox_guest_dns_fallback_enabled: true
+clawbox_guest_dns_fallback_servers:
+  - "1.1.1.1"
+  - "8.8.8.8"
 
 # Host<->guest sync target paths inside the guest
 signal_cli_payload_mount: "/Users/Shared/clawbox-sync/signal-cli-payload"
