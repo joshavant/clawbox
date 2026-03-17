@@ -143,7 +143,9 @@
   register: network_preflight_dns_resolution_after_fallback
   changed_when: false
   failed_when: false
-  when: network_preflight_dns_fallback_apply is defined and network_preflight_dns_fallback_apply.rc == 0
+  when: >-
+    network_preflight_dns_fallback_apply is defined and
+    (network_preflight_dns_fallback_apply.rc | default(1)) == 0
 
 - name: Choose effective DNS probe result
   set_fact:
@@ -161,7 +163,7 @@
         servers: {{ (clawbox_guest_dns_fallback_servers | default(['1.1.1.1', '8.8.8.8'])) | join(', ') }}
   when: >-
     network_preflight_dns_fallback_apply is defined and
-    network_preflight_dns_fallback_apply.rc == 0 and
+    (network_preflight_dns_fallback_apply.rc | default(1)) == 0 and
     network_preflight_dns_resolution_effective.rc == 0 and
     (network_preflight_dns_resolution_effective.stdout | trim | length) > 0
 

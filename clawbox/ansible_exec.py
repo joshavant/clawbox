@@ -6,6 +6,13 @@ from pathlib import Path
 
 from clawbox.errors import UserFacingError
 
+PASSWORD_AUTH_SSH_COMMON_ARGS = (
+    "-o IdentitiesOnly=yes "
+    "-o PubkeyAuthentication=no "
+    "-o PreferredAuthentications=password,keyboard-interactive "
+    "-o NumberOfPasswordPrompts=1"
+)
+
 
 def build_ansible_shell_command(
     *,
@@ -35,6 +42,7 @@ def build_ansible_shell_command(
         f"ansible_password={ansible_password}",
         "-e",
         f"ansible_command_timeout={command_timeout_seconds}",
+        f"--ssh-common-args={PASSWORD_AUTH_SSH_COMMON_ARGS}",
         "-e",
         "ansible_become=false",
     ]

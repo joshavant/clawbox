@@ -49,6 +49,17 @@
     PATH: "{{ clawbox_brew_env_path }}"
   when: clawbox_profile == 'developer'
 
+- name: Ensure OpenClaw source tree ownership before dependency install
+  become: true
+  file:
+    path: "{{ openclaw_source_mount }}"
+    owner: "{{ vm_name }}"
+    group: staff
+    recurse: true
+    follow: false
+    state: directory
+  when: clawbox_profile == 'developer'
+
 - name: Install OpenClaw source dependencies
   become_user: "{{ vm_name }}"
   command: pnpm install --frozen-lockfile

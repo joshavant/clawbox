@@ -22,6 +22,13 @@ def test_build_ansible_shell_command_defaults() -> None:
         become=False,
     )
     assert cmd[:6] == ["ansible", "-i", "192.168.64.10,", "clawbox-91", "-T", "8"]
+    ssh_args = (
+        "-o IdentitiesOnly=yes "
+        "-o PubkeyAuthentication=no "
+        "-o PreferredAuthentications=password,keyboard-interactive "
+        "-o NumberOfPasswordPrompts=1"
+    )
+    assert f"--ssh-common-args={ssh_args}" in cmd
     assert "ansible_become=false" in cmd
     assert "-b" not in cmd
     assert "ansible_become=true" not in cmd
