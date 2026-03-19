@@ -151,7 +151,11 @@
   set_fact:
     network_preflight_dns_resolution_effective: >-
       {{ network_preflight_dns_resolution_after_fallback
-         if (network_preflight_dns_resolution_after_fallback is defined)
+         if (
+           network_preflight_dns_resolution_after_fallback is defined and
+           not (network_preflight_dns_resolution_after_fallback.skipped | default(false) | bool) and
+           (network_preflight_dns_resolution_after_fallback.rc is defined)
+         )
          else network_preflight_dns_resolution }}
 
 - name: Confirm DNS fallback succeeded

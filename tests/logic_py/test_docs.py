@@ -92,6 +92,8 @@ def test_network_preflight_has_guest_dns_fallback_step() -> None:
     assert "Fail fast when DNS remains unavailable after fallback" in role
     assert "Check HTTPS reachability for Homebrew installer endpoint" not in role
     assert "networksetup -setdnsservers" in role
+    assert "network_preflight_dns_resolution_after_fallback.rc is defined" in role
+    assert "network_preflight_dns_resolution_after_fallback.skipped | default(false) | bool" in role
 
 
 def test_development_plan_references_python_cli_not_legacy_shell_wrappers() -> None:
